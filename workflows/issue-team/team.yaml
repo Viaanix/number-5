@@ -1,0 +1,53 @@
+# Issue team: issue → PR → review follow-up → post-merge closeout, in any GitHub repository.
+# Entry points are in workflow.yaml; each starts one entry agent:
+#   root      work-issue <n>   fresh worktree from the remote default branch → opened PR
+#   followup  pr-followup <n>  worktree on the PR branch → fixes pushed, threads answered
+#   closeout  closeout <n>     fresh worktree at the latest default branch → verified, open threads filed as issues, issues closed
+#
+# Every agent is Claude Code (`harness: claude-code`) on the user's Claude subscription;
+# no API key is needed. A harness agent receives only the task message: docker-agent
+# drops instruction files, toolsets, skills, sub_agents and permission rules for it
+# (docs/docker-agent/gotchas.md). So:
+#   - each entry agent's whole prompt is its entry point's `message` in workflow.yaml;
+#   - root and followup start builder, tester and reviewer with Claude Code's own
+#     sub-agent tool; the tester and reviewer prompts are roles/*.md, printed by
+#     `issue-team-role <role>`;
+#   - the helpers in bin/ are called through Claude Code's shell by bare name;
+#   - the publish gates and the "never force-push / merge" rules are instructions only.
+# Per-repository context comes from that repository's CLAUDE.md, which Claude Code reads.
+
+agents:
+  root:
+    description: Owns one GitHub issue from a fresh worktree to an opened pull request
+    harness:
+      type: claude-code
+      effort: high
+
+  followup:
+    description: Resolves review threads and failing checks on an existing pull request branch
+    harness:
+      type: claude-code
+      effort: high
+
+  closeout:
+    description: After a pull request merges, verifies the default branch, files issues for its open review threads, and closes the linked issues with evidence
+    harness:
+      type: claude-code
+      effort: high
+
+# Effort levels, chosen with `j5 issue-team ... --effort <name>` (docker agent run
+# --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
+# the file as written (every agent at effort high).
+# docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
+flavors:
+  low:
+    agents:
+      root:
+        harness:
+          effort: low
+      followup:
+        harness:
+          effort: low
+      closeout:
+        harness:
+          effort: low

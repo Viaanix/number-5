@@ -171,20 +171,25 @@ describe("loadManifest", () => {
   });
 });
 
+// The layout contract written out, not read from teams.ts: fixtures placed through the
+// code under test would move with it, and a scan of the wrong directory would pass.
+const TEAMS_DIRECTORY_LAYOUT_NAME = "workflows";
+
 describe("discoverTeams", () => {
-  test("loads manifests one level down, skips directories without one, sorts by name", () => {
+  test("loads manifests one level below workflows/, skips directories without one, sorts by name", () => {
     const repositoryRoot = createTemporaryDirectory();
+    const teamsDirectory = join(repositoryRoot, TEAMS_DIRECTORY_LAYOUT_NAME);
     writeTeamFixture(
-      join(repositoryRoot, "zeta"),
+      join(teamsDirectory, "zeta"),
       VALID_MANIFEST_YAML.replace("name: sample-team", "name: zeta-team"),
       buildTeamYaml([]),
     );
     writeTeamFixture(
-      join(repositoryRoot, "alpha"),
+      join(teamsDirectory, "alpha"),
       VALID_MANIFEST_YAML.replace("name: sample-team", "name: alpha-team"),
       buildTeamYaml([]),
     );
-    mkdirSync(join(repositoryRoot, "docs"));
+    mkdirSync(join(teamsDirectory, "experiment"));
 
     expect(discoverTeams(repositoryRoot).map((team) => team.name)).toEqual([
       "alpha-team",
@@ -192,10 +197,35 @@ describe("discoverTeams", () => {
     ]);
   });
 
+  // Catches a scan that still reads the repository root, where teams lived before
+  // workflows/ existed: a stray top-level workflow.yaml must not become a team.
+  test("ignores a manifest in a top-level directory of the repository", () => {
+    const repositoryRoot = createTemporaryDirectory();
+    writeTeamFixture(
+      join(repositoryRoot, "old-team"),
+      VALID_MANIFEST_YAML.replace("name: sample-team", "name: old-team"),
+      buildTeamYaml([]),
+    );
+    writeTeamFixture(
+      join(repositoryRoot, TEAMS_DIRECTORY_LAYOUT_NAME, "new-team"),
+      VALID_MANIFEST_YAML.replace("name: sample-team", "name: new-team"),
+      buildTeamYaml([]),
+    );
+
+    expect(discoverTeams(repositoryRoot).map((team) => team.name)).toEqual(["new-team"]);
+  });
+
+  // Catches a raw ENOENT from readdirSync, which would replace the launcher's
+  // "no team manifests found" message with a stack trace.
+  test("returns no teams when workflows/ does not exist", () => {
+    expect(discoverTeams(createTemporaryDirectory())).toEqual([]);
+  });
+
   test("rejects two manifests with the same name", () => {
     const repositoryRoot = createTemporaryDirectory();
-    writeTeamFixture(join(repositoryRoot, "one"), VALID_MANIFEST_YAML, buildTeamYaml([]));
-    writeTeamFixture(join(repositoryRoot, "two"), VALID_MANIFEST_YAML, buildTeamYaml([]));
+    const teamsDirectory = join(repositoryRoot, TEAMS_DIRECTORY_LAYOUT_NAME);
+    writeTeamFixture(join(teamsDirectory, "one"), VALID_MANIFEST_YAML, buildTeamYaml([]));
+    writeTeamFixture(join(teamsDirectory, "two"), VALID_MANIFEST_YAML, buildTeamYaml([]));
     expect(() => discoverTeams(repositoryRoot)).toThrow(
       "two team manifests are named 'sample-team'",
     );

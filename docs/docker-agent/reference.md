@@ -26,7 +26,7 @@ Default data directory: `~/.cagent` (sessions, worktrees under `~/.cagent/worktr
 
 ## team.yaml keys used here
 
-Keys as `issue-team/team.yaml` uses them. Comments come from `--help`, `issue-team/README.md` and the receipts in [gotchas.md](gotchas.md); `docker agent debug config` is the check when in doubt.
+Keys as `workflows/issue-team/team.yaml` used them while its agents were native model agents; both teams now use only `harness: claude-code` agents, for which `instruction_file`, `toolsets`, `skills`, `sub_agents`, `add_prompt_files` and `permissions` have no effect ([gotcha](gotchas.md#a-harness-claude-code-agent-gets-none-of-docker-agents-agent-extras)). Comments come from `--help`, the issue team's README and the receipts in [gotchas.md](gotchas.md); `docker agent debug config` is the check when in doubt.
 
 ```yaml
 models:                       # named model configs, referenced by agents

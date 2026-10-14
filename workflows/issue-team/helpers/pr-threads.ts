@@ -9,7 +9,12 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import { HelperUsageError, readToolArgument, runAndCapture, runHelper } from "./command.ts";
+import {
+  HelperUsageError,
+  readToolArgument,
+  runAndCapture,
+  runHelper,
+} from "../../../launcher/src/team-helper.ts";
 
 // Pull request numbers: digits only.
 const PULL_REQUEST_NUMBER_PATTERN = /^[0-9]+$/;

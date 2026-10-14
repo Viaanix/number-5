@@ -18,7 +18,7 @@ import { stripVTControlCharacters } from "node:util";
 import { readPathValue, withPathValue } from "../launcher/src/environment.ts";
 import type { WorkflowManifest } from "../launcher/src/manifest.ts";
 import { readTeamConfigSummary } from "../launcher/src/team-config.ts";
-import { discoverTeams } from "../launcher/src/teams.ts";
+import { discoverTeams, resolveTeamsDirectory } from "../launcher/src/teams.ts";
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, "..");
 const SUCCESS_EXIT_CODE = 0;
@@ -122,7 +122,7 @@ function main(): number {
     return 1;
   }
   if (teams.length === 0) {
-    console.error(`no team manifests under ${REPOSITORY_ROOT}`);
+    console.error(`no team manifests under ${resolveTeamsDirectory(REPOSITORY_ROOT)}`);
     return 1;
   }
 

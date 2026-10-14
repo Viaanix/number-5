@@ -7,8 +7,16 @@ import {
   renderPlanAsShellCommand,
   shellDialectForPlatform,
 } from "../src/shell-quote.ts";
+import { discoverTeams } from "../src/teams.ts";
 
 const PRINT_ARGUMENTS_SCRIPT = join(import.meta.dir, "fixtures", "print-arguments.ts");
+
+// Whole prompts, as harness teams send them: multi-line messages with backticks, `$`,
+// quotes, `<…>` and Markdown. Read from every real manifest so a new prompt is covered too.
+const REPOSITORY_ROOT = join(import.meta.dir, "..", "..");
+const PROMPT_MESSAGES = discoverTeams(REPOSITORY_ROOT).flatMap((team) =>
+  Object.values(team.entrypoints).map((entryPoint) => entryPoint.message),
+);
 
 // Words that exercise each dialect's special characters.
 const AWKWARD_WORDS = [
@@ -57,6 +65,14 @@ describe.skipIf(process.platform === "win32")("quoteForPosixShell", () => {
       argumentsReceivedThroughShell(["bash", "-c"], AWKWARD_WORDS.map(quoteForPosixShell)),
     ).toEqual(AWKWARD_WORDS);
   });
+
+  // Catches a --print line that a user cannot paste back: one mis-quoted character in
+  // a prompt would cut the message short or run part of it as a command.
+  test("bash passes whole prompt messages through unchanged", () => {
+    expect(
+      argumentsReceivedThroughShell(["bash", "-c"], PROMPT_MESSAGES.map(quoteForPosixShell)),
+    ).toEqual(PROMPT_MESSAGES);
+  });
 });
 
 // PowerShell is rendered on Windows, but pwsh also runs on Linux and macOS. The CI
@@ -87,6 +103,19 @@ describe("quoteForPowerShell", () => {
       ).toEqual(AWKWARD_WORDS);
     },
     // PowerShell's cold start took over 5 s (bun's default limit) on the Linux CI runner.
+    POWERSHELL_TEST_TIMEOUT_MILLISECONDS,
+  );
+
+  test.skipIf(powerShellPath === null && !powerShellRequired)(
+    "pwsh passes whole prompt messages through unchanged",
+    () => {
+      expect(
+        argumentsReceivedThroughShell(
+          ["pwsh", "-NoProfile", "-NonInteractive", "-Command"],
+          PROMPT_MESSAGES.map(quoteForPowerShell),
+        ),
+      ).toEqual(PROMPT_MESSAGES);
+    },
     POWERSHELL_TEST_TIMEOUT_MILLISECONDS,
   );
 });

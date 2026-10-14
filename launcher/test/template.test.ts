@@ -12,6 +12,12 @@ describe("extractPlaceholderNames", () => {
     expect(extractPlaceholderNames("json { } {Issue} {1} {pr-number}")).toEqual(["pr-number"]);
   });
 
+  // Catches escaped braces read as a placeholder: `{{owner}}` would then be an
+  // "unknown placeholder" manifest error for a prompt that only quotes a gh URL.
+  test("skips names inside escaped braces", () => {
+    expect(extractPlaceholderNames("gh api repos/{{owner}}/{{repo}}/pulls/{pr}")).toEqual(["pr"]);
+  });
+
   test("returns nothing for a template without placeholders", () => {
     expect(extractPlaceholderNames("Close it out.")).toEqual([]);
   });
@@ -28,6 +34,18 @@ describe("fillTemplate", () => {
     expect(() => fillTemplate("Work issue #{isue}", { issue: "12" })).toThrow(
       "template placeholder {isue} has no value",
     );
+  });
+
+  // Catches `{{repo}}` being filled with the project name: the gh command in the
+  // prompt would then call the wrong URL without any error.
+  test("turns escaped braces into literal braces, around names that are placeholders too", () => {
+    expect(
+      fillTemplate("gh api repos/{{owner}}/{{repo}}/pulls/{pr}/reviews", { repo: "app", pr: "7" }),
+    ).toBe("gh api repos/{owner}/{repo}/pulls/7/reviews");
+  });
+
+  test("leaves a single brace that is not a placeholder as it is", () => {
+    expect(fillTemplate('json { "a": 1 } and } alone', {})).toBe('json { "a": 1 } and } alone');
   });
 
   test("inserts values literally, without re-expanding placeholders inside them", () => {

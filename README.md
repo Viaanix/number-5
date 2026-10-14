@@ -6,11 +6,12 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 | Team | What it does |
 |---|---|
-| [issue-team](issue-team/README.md) | GitHub issue → pull request → review follow-up → post-merge closeout, in any repository |
+| [issue-team](workflows/issue-team/README.md) | GitHub issue → pull request → review follow-up → post-merge closeout, in any repository |
+| [test-quality](workflows/test-quality/README.md) | Audit, review, write or fix tests with the `j5-test-quality` skill, in the current checkout |
 
 ## Quick start
 
-Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), plus whatever each team needs (issue-team: `gh` and `claude` logged in; see its README).
+Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), and `claude` logged in to a Claude subscription: every agent is Claude Code (`harness: claude-code`), so no API key is needed. issue-team also needs `gh` logged in; see each team's README.
 
 ```bash
 bun scripts/install.ts      # link ~/number-5, add `j5` to your shell, install skills, bun install

@@ -1,0 +1,59 @@
+# Test-quality team: runs the j5-test-quality skill against a project checkout.
+# Entry points are in workflow.yaml; each starts one agent, one skill workflow:
+#   auditor   audit           review-at-scale.md   read-only; report to .j5/review/
+#   reviewer  review-branch   review-single.md     read-only; report in the session
+#   writer    write-tests     generate.md          adds tests in the checkout; no production code
+#   fixer     fix-failing     maintain-failing.md  fixes the code (or, with justification, the test)
+#
+# Every agent is Claude Code (`harness: claude-code`) on the user's Claude subscription;
+# no API key is needed. A harness agent receives only the task message: docker-agent
+# drops instruction files, toolsets, skills, sub_agents and permission rules for it
+# (docs/docker-agent/gotchas.md). So each agent's whole prompt is its entry point's
+# `message` in workflow.yaml, the helpers in bin/ are called through Claude Code's
+# shell by bare name, and the read-only and no-commit rules are instructions only.
+# Per-repository context comes from that repository's CLAUDE.md, which Claude Code reads.
+
+agents:
+  auditor:
+    description: Read-only audit of a test suite at scale. Writes one report under .j5/review/ and edits nothing else.
+    harness:
+      type: claude-code
+      effort: high
+
+  reviewer:
+    description: Independent read-only review of the tests added or changed on the current branch.
+    harness:
+      type: claude-code
+      effort: high
+
+  writer:
+    description: Writes tests that fail against broken implementations, in the current checkout. Does not edit production code, commit, or push.
+    harness:
+      type: claude-code
+      effort: high
+
+  fixer:
+    description: Finds why a test fails and fixes the cause, in the current checkout. Changes a test only with a written justification. Does not commit or push.
+    harness:
+      type: claude-code
+      effort: high
+
+# Effort levels, chosen with `j5 test-quality ... --effort <name>` (docker agent run
+# --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
+# the file as written (every agent at effort high).
+# docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
+flavors:
+  low:
+    agents:
+      auditor:
+        harness:
+          effort: low
+      reviewer:
+        harness:
+          effort: low
+      writer:
+        harness:
+          effort: low
+      fixer:
+        harness:
+          effort: low

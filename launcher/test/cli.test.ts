@@ -10,23 +10,40 @@ import { stripVTControlCharacters } from "node:util";
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "../src/arguments.ts";
 import { formatUsage } from "../src/cli.ts";
 import { readPathValue, withPathValue } from "../src/environment.ts";
+import { loadManifest } from "../src/manifest.ts";
 import { quoteForPosixShell, quoteForPowerShell } from "../src/shell-quote.ts";
+import { fillTemplate } from "../src/template.ts";
 import {
   createFixtureProject,
   createTemporaryDirectory,
   FIXTURE_DEFAULT_BRANCH,
   FIXTURE_FEATURE_BRANCH,
   removeTemporaryDirectories,
-  writeFakeCommand,
+  writeFakeExecutable,
 } from "./fixtures.ts";
 
 afterAll(removeTemporaryDirectories);
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, "..", "..");
 const CLI_PATH = join(REPOSITORY_ROOT, "launcher", "src", "cli.ts");
-const ISSUE_TEAM_DIRECTORY = join(REPOSITORY_ROOT, "issue-team");
+const ISSUE_TEAM_DIRECTORY = join(REPOSITORY_ROOT, "workflows", "issue-team");
 const ISSUE_TEAM_CONFIG = join(ISSUE_TEAM_DIRECTORY, "team.yaml");
 const ISSUE_TEAM_BIN = join(ISSUE_TEAM_DIRECTORY, "bin");
+const ISSUE_TEAM_MANIFEST = loadManifest(join(ISSUE_TEAM_DIRECTORY, "workflow.yaml"));
+
+// The first message j5 must send: the entry point's whole prompt from the real
+// manifest, filled. Read rather than copied, so the tests follow prompt edits but
+// still fail when the launcher sends anything else.
+function expectedFirstMessage(
+  entryPointName: string,
+  parameterValues: Record<string, string>,
+): string {
+  const entryPoint = ISSUE_TEAM_MANIFEST.entrypoints[entryPointName];
+  if (entryPoint === undefined) {
+    throw new Error(`issue-team has no entry point ${entryPointName}`);
+  }
+  return fillTemplate(entryPoint.message, parameterValues);
+}
 const EXIT_CODE_USAGE = 2;
 
 // A PR number no real ~/.cagent/worktrees/pr-<n> will have, so the state is "absent".
@@ -81,7 +98,7 @@ describe("j5 --print", () => {
     const result = runCli(["issue-team", "work-issue", "--issue", "12", "--print"], projectRoot);
     expect(result).toEqual({
       exitCode: 0,
-      standardOutput: `${expectedCommandPrefix(projectRoot)}docker agent run ${quoteForThisPlatform(ISSUE_TEAM_CONFIG)} --agent root --worktree=print-app-issue-12 --worktree-base origin/${FIXTURE_DEFAULT_BRANCH} 'Work issue #12'`,
+      standardOutput: `${expectedCommandPrefix(projectRoot)}docker agent run ${quoteForThisPlatform(ISSUE_TEAM_CONFIG)} --agent root --worktree=print-app-issue-12 --worktree-base origin/${FIXTURE_DEFAULT_BRANCH} ${quoteForThisPlatform(expectedFirstMessage("work-issue", { issue: "12" }))}`,
       standardError: "",
     });
   });
@@ -108,7 +125,7 @@ describe("j5 --print", () => {
     );
     expect(result.exitCode).toBe(0);
     expect(result.standardOutput).toEndWith(
-      `--agent closeout --flavor low --worktree=flags-app-closeout-pr-7 --worktree-base origin/${FIXTURE_FEATURE_BRANCH} --safety balanced 'PR #7 is merged. Close it out.'`,
+      `--agent closeout --flavor low --worktree=flags-app-closeout-pr-7 --worktree-base origin/${FIXTURE_FEATURE_BRANCH} --safety balanced ${quoteForThisPlatform(expectedFirstMessage("closeout", { pr: "7" }))}`,
     );
   });
 
@@ -120,7 +137,7 @@ describe("j5 --print", () => {
     );
     expect(result.exitCode).toBe(0);
     expect(result.standardOutput).toContain(
-      `--agent followup --worktree-pr ${UNUSED_PULL_REQUEST_NUMBER} 'Follow up on PR #${UNUSED_PULL_REQUEST_NUMBER}:`,
+      `--agent followup --worktree-pr ${UNUSED_PULL_REQUEST_NUMBER} ${quoteForThisPlatform(expectedFirstMessage("pr-followup", { pr: UNUSED_PULL_REQUEST_NUMBER }))}`,
     );
   });
 });
@@ -273,7 +290,9 @@ describe("j5 launching", () => {
   test("runs docker in the project with the team's bin first on PATH and returns its exit code", () => {
     const { projectRoot } = createFixtureProject("launch-app");
     const fakeBinDirectory = createTemporaryDirectory();
-    writeFakeCommand(
+    // An executable, not a .cmd: the first message is a multi-line prompt, which
+    // cmd.exe would cut at the first newline on Windows (see writeFakeExecutable).
+    writeFakeExecutable(
       fakeBinDirectory,
       "docker",
       join(import.meta.dir, "fixtures", "fake-docker.ts"),
@@ -300,7 +319,7 @@ describe("j5 launching", () => {
         "--worktree=launch-app-issue-5",
         "--worktree-base",
         `origin/${FIXTURE_DEFAULT_BRANCH}`,
-        "Work issue #5",
+        expectedFirstMessage("work-issue", { issue: "5" }),
       ],
     });
     // Without prompts there is no confirmation, so the command is echoed as a receipt.
@@ -318,6 +337,13 @@ describe("j5 list and help", () => {
     expect(result.standardOutput).toContain("  pr-followup --pr <integer>");
     expect(result.standardOutput).toContain("  closeout --pr <integer>");
     expect(result.standardOutput).toContain("  efforts: low");
+  });
+
+  // Catches the usage line of a parameterless entry point ending in a space, which
+  // the separator before the (empty) parameter list used to add.
+  test("list shows a parameterless entry point as its bare name", () => {
+    const result = runCli(["list"], createTemporaryDirectory());
+    expect(result.standardOutput).toContain("\n  review-branch\n");
   });
 
   test("help opens with the greeting, then the usage", () => {

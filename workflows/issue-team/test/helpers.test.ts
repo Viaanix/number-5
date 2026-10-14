@@ -1,4 +1,4 @@
-// Tests for the issue-team helpers (issue-team/helpers, launched by issue-team/bin).
+// Tests for the issue-team helpers (workflows/issue-team/helpers, launched by its bin/).
 // Git helpers run against real temporary repositories; pr-threads runs against a
 // fake gh. The last block calls the helpers by bare name through the same shells
 // docker-agent's script tools use on each OS, with arguments in the environment.
@@ -7,28 +7,25 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
-import {
-  findPathVariableName,
-  readPathValue,
-  withPathValue,
-} from "../../launcher/src/environment.ts";
+import { findPathVariableName, readPathValue } from "../../../launcher/src/environment.ts";
 import {
   createFixtureProject,
   createTemporaryDirectory,
+  DOCKER_AGENT_SHELLS,
   FIXTURE_DEFAULT_BRANCH,
+  type HelperResult,
   removeTemporaryDirectories,
   runGit,
+  runHelperScriptFile,
+  runThroughDockerAgentShell,
   writeFakeCommand,
-} from "../../launcher/test/fixtures.ts";
+} from "../../../launcher/test/fixtures.ts";
 
 afterAll(removeTemporaryDirectories);
 
 const TEAM_DIRECTORY = resolve(import.meta.dir, "..");
 const TEAM_BIN_DIRECTORY = join(TEAM_DIRECTORY, "bin");
-const RUNNING_ON_WINDOWS = process.platform === "win32";
 const USAGE_EXIT_CODE = 2;
-
-type HelperResult = { exitCode: number; standardOutput: string; standardError: string };
 
 function runHelperScript(
   helperName: string,
@@ -36,19 +33,12 @@ function runHelperScript(
   workingDirectory: string,
   extraEnvironment: Record<string, string> = {},
 ): HelperResult {
-  const completedProcess = Bun.spawnSync(
-    ["bun", join(TEAM_DIRECTORY, "helpers", `${helperName}.ts`), ...helperArguments],
-    {
-      cwd: workingDirectory,
-      stdin: "ignore",
-      env: { ...process.env, ...extraEnvironment },
-    },
+  return runHelperScriptFile(
+    join(TEAM_DIRECTORY, "helpers", `${helperName}.ts`),
+    helperArguments,
+    workingDirectory,
+    extraEnvironment,
   );
-  return {
-    exitCode: completedProcess.exitCode,
-    standardOutput: completedProcess.stdout.toString(),
-    standardError: completedProcess.stderr.toString(),
-  };
 }
 
 // A feature branch two commits ahead of origin/trunk, plus an uncommitted edit and an
@@ -269,16 +259,38 @@ describe("issue-team-pr-threads", () => {
   });
 });
 
-// The shells docker-agent v1.145.0 runs script tools with: $SHELL -c on Unix
-// (sh here, the strictest), PowerShell -Command or cmd.exe /C on Windows. Each
-// call names the helper bare, with arguments only in the environment.
-const DOCKER_AGENT_SHELLS: Array<{ shellName: string; commandPrefix: string[] }> =
-  RUNNING_ON_WINDOWS
-    ? [
-        { shellName: "pwsh", commandPrefix: ["pwsh", "-NoProfile", "-NonInteractive", "-Command"] },
-        { shellName: "cmd", commandPrefix: ["cmd.exe", "/d", "/c"] },
-      ]
-    : [{ shellName: "sh", commandPrefix: ["sh", "-c"] }];
+describe("issue-team-role", () => {
+  const testerPrompt = readFileSync(join(TEAM_DIRECTORY, "roles", "tester.md"), "utf8");
+
+  // Catches a helper that prints a different file, or adds to it: the entry agents
+  // paste this output verbatim as the start of a sub-agent's task.
+  test("prints the role's prompt file exactly", () => {
+    expect(runHelperScript("role", ["tester"], createTemporaryDirectory())).toEqual({
+      exitCode: 0,
+      standardOutput: testerPrompt,
+      standardError: "",
+    });
+  });
+
+  test("reads the role from the environment when no argument is given", () => {
+    const result = runHelperScript("role", [], createTemporaryDirectory(), { role: "tester" });
+    expect(result.standardOutput).toBe(testerPrompt);
+  });
+
+  // Catches a name that reaches outside roles/ (a path join without the allow-list)
+  // and a missing name that prints nothing and still exits 0.
+  test.each([
+    [["../team"], "a path outside roles/"],
+    [["builder"], "a role without a prompt file"],
+    [[], "no role at all"],
+  ])("refuses %p (%s) with the list of roles", (helperArguments) => {
+    expect(runHelperScript("role", helperArguments, createTemporaryDirectory())).toEqual({
+      exitCode: USAGE_EXIT_CODE,
+      standardOutput: "",
+      standardError: "issue-team-role: usage: issue-team-role <reviewer|tester>\n",
+    });
+  });
+});
 
 describe.each(DOCKER_AGENT_SHELLS)(
   "helpers by bare name through $shellName",
@@ -288,20 +300,13 @@ describe.each(DOCKER_AGENT_SHELLS)(
       workingDirectory: string,
       extraEnvironment: Record<string, string> = {},
     ): HelperResult {
-      const environment = withPathValue(
-        { ...process.env, ...extraEnvironment },
-        `${TEAM_BIN_DIRECTORY}${delimiter}${readPathValue(process.env)}`,
+      return runThroughDockerAgentShell(
+        commandPrefix,
+        TEAM_BIN_DIRECTORY,
+        command,
+        workingDirectory,
+        extraEnvironment,
       );
-      const completedProcess = Bun.spawnSync([...commandPrefix, command], {
-        cwd: workingDirectory,
-        stdin: "ignore",
-        env: environment,
-      });
-      return {
-        exitCode: completedProcess.exitCode,
-        standardOutput: completedProcess.stdout.toString().replaceAll("\r\n", "\n"),
-        standardError: completedProcess.stderr.toString(),
-      };
     }
 
     test("issue-team-base-ref", () => {
@@ -319,6 +324,12 @@ describe.each(DOCKER_AGENT_SHELLS)(
       const result = runThroughShell("issue-team-test-prescreen", projectRoot);
       expect(result.exitCode).toBe(STRICT_FAILURE_EXIT_CODE);
       expect(result.standardOutput).toContain("[HIGH] disabled-tests  focused.test.ts:1\n");
+    });
+
+    test("issue-team-role", () => {
+      const result = runThroughShell("issue-team-role reviewer", createTemporaryDirectory());
+      expect(result.exitCode).toBe(0);
+      expect(result.standardOutput).toStartWith("You are an independent reviewer.");
     });
 
     test("issue-team-change-diff with since in the environment", () => {
