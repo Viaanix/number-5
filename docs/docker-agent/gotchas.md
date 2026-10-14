@@ -24,7 +24,7 @@ docker agent run team.yaml --dry-run --flavor nope "x"   # exit 0 as well
 
 **Consequence:** `--flavor lwo` runs the team at its default settings and nothing tells you.
 
-**Mitigation:** `daw` reads the flavor names from `team.yaml` and rejects anything else (`launcher/src/parameters.ts`, `describeInvalidEffort`). Do the same check in any other wrapper.
+**Mitigation:** `j5` reads the flavor names from `team.yaml` and rejects anything else (`launcher/src/parameters.ts`, `describeInvalidEffort`). Do the same check in any other wrapper.
 
 ### A flavor that repeats the base values applies without a word
 
@@ -63,7 +63,7 @@ docker agent run issue-team/team.yaml --agent closer --dry-run --exec x
 
 **Consequence:** a dry run is not proof that `-a <name>` is right.
 
-**Mitigation:** `daw` and `validate:teams` check every entry point's agent against the `agents:` keys in `team.yaml`.
+**Mitigation:** `j5` and `validate:teams` check every entry point's agent against the `agents:` keys in `team.yaml`.
 
 ### `run --dry-run --worktree=<name>` creates no worktree
 
@@ -150,8 +150,8 @@ The data directory, and with it `worktrees/`, is `<home>/.cagent` on every OS (`
 Carried over from `issue-team/README.md` ("Known limits") or reported without a receipt in this repository. Confirm one with a receipt, then move it up.
 
 - **The docs on docker.github.io track `main`**, not the release, and document flags v1.145.0 lacks (e.g. `--last`). Trust `docker agent <command> --help` over the website.
-- **PR worktrees are named `pr-<number>`** without the repository name, so the same PR number in two repositories collides under `~/.cagent/worktrees/`. `daw` refuses a `pr-<n>` worktree whose `origin` is another repository.
+- **PR worktrees are named `pr-<number>`** without the repository name, so the same PR number in two repositories collides under `~/.cagent/worktrees/`. `j5` refuses a `pr-<n>` worktree whose `origin` is another repository.
 - **Worktrees from `--exec` runs are never removed automatically.** Clean up with `git worktree list` / `git worktree remove <path>`.
 - **`permissions.deny` rules cover docker-agent's own shell tool only.** A `harness: claude-code` agent runs Claude Code's tools, outside those rules.
-- **Script tools resolve commands through the docker-agent process's `PATH`.** A helper that is not on `PATH` fails with "command not found" at call time, not at startup. `daw` prepends each team's `path:` directories.
+- **Script tools resolve commands through the docker-agent process's `PATH`.** A helper that is not on `PATH` fails with "command not found" at call time, not at startup. `j5` prepends each team's `path:` directories.
 - **`--worktree`, `--worktree-pr` and `--sandbox` cannot be combined.**

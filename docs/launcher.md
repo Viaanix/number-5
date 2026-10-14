@@ -1,13 +1,13 @@
-# The `daw` launcher
+# The `j5` launcher
 
 One command to start any team in this repository against any project checkout. It picks the team, entry point, project, base branch, effort and parameters — from flags, or by asking — and runs `docker agent run` with the team's helper scripts on `PATH`.
 
-Source: `launcher/src/` (start at `cli.ts`). Entry points: `bin/daw` (Linux, macOS), `bin/daw.cmd` (Windows). Install: `scripts/install.ts`.
+Source: `launcher/src/` (start at `cli.ts`). Entry points: `bin/j5` (Linux, macOS), `bin/j5.cmd` (Windows). Install: `scripts/install.ts`.
 
 ## Install
 
 ```bash
-bun scripts/install.ts                 # link + daw in your shell's startup file + bun install if needed
+bun scripts/install.ts                 # link + j5 in your shell's startup file + bun install if needed
 bun scripts/install.ts --dry-run       # show what it would do
 bun scripts/install.ts --link ~/agents --alias agents   # other link path / command name
 bun scripts/install.ts --shell zsh     # configure another shell than $SHELL
@@ -16,23 +16,23 @@ bun scripts/install.ts --uninstall
 
 | OS / shell | Link | Startup file | Command |
 |---|---|---|---|
-| Linux, bash | symlink | `~/.bash_aliases` if `~/.bashrc` sources it, else `~/.bashrc` | `alias daw=<link>/bin/daw` |
-| macOS, bash | symlink | `~/.bash_profile` | `alias daw=<link>/bin/daw` |
-| Linux/macOS, zsh | symlink | `~/.zshrc` | `alias daw=<link>/bin/daw` |
-| Windows, PowerShell | directory junction (no admin rights needed) | `$PROFILE` | `function daw { & bun <link>\launcher\src\cli.ts @args }` |
+| Linux, bash | symlink | `~/.bash_aliases` if `~/.bashrc` sources it, else `~/.bashrc` | `alias j5=<link>/bin/j5` |
+| macOS, bash | symlink | `~/.bash_profile` | `alias j5=<link>/bin/j5` |
+| Linux/macOS, zsh | symlink | `~/.zshrc` | `alias j5=<link>/bin/j5` |
+| Windows, PowerShell | directory junction (no admin rights needed) | `$PROFILE` | `function j5 { & bun <link>\launcher\src\cli.ts @args }` |
 
-The command goes through the link, so moving the clone only needs a re-run of the installer. `bin\daw.cmd` serves cmd.exe users on Windows; the PowerShell function calls bun directly so Ctrl-C inside the agent does not trigger cmd's "Terminate batch job (Y/N)?". The alias block sits between `# >>> docker-agent-workflows launcher >>>` markers; re-running replaces it.
+The command goes through the link, so moving the clone only needs a re-run of the installer. `bin\j5.cmd` serves cmd.exe users on Windows; the PowerShell function calls bun directly so Ctrl-C inside the agent does not trigger cmd's "Terminate batch job (Y/N)?". The alias block sits between `# >>> number-5 launcher >>>` markers; re-running replaces it.
 
 ## Use
 
 ```bash
-daw                                         # pick everything interactively
-daw list                                    # teams, entry points, parameters, efforts
-daw issue-team work-issue --issue 123       # from inside the project checkout
-daw issue-team work-issue --issue 123 --project ~/code/app --effort low
-daw issue-team work-issue --issue 123 --base origin/release-2
-daw issue-team pr-followup --pr 456 -- --safety balanced   # after --: raw docker agent run flags
-daw issue-team closeout --pr 456 --print    # show the exact command, run nothing
+j5                                         # pick everything interactively
+j5 list                                    # teams, entry points, parameters, efforts
+j5 issue-team work-issue --issue 123       # from inside the project checkout
+j5 issue-team work-issue --issue 123 --project ~/code/app --effort low
+j5 issue-team work-issue --issue 123 --base origin/release-2
+j5 issue-team pr-followup --pr 456 -- --safety balanced   # after --: raw docker agent run flags
+j5 issue-team closeout --pr 456 --print    # show the exact command, run nothing
 ```
 
 | Option | Meaning | Default |
@@ -50,7 +50,7 @@ The base-branch list shows remote branches as of your last `git fetch`. docker-a
 
 ## What it runs
 
-`daw issue-team work-issue --issue 12 --effort low --print`, inside a clone named `my-app`:
+`j5 issue-team work-issue --issue 12 --effort low --print`, inside a clone named `my-app`:
 
 ```bash
 cd /path/to/my-app && PATH=<repo>/issue-team/bin:"$PATH" docker agent run <repo>/issue-team/team.yaml --agent root --flavor low --worktree=my-app-issue-12 --worktree-base origin/main 'Work issue #12'
@@ -61,8 +61,8 @@ cd /path/to/my-app && PATH=<repo>/issue-team/bin:"$PATH" docker agent run <repo>
 A top-level directory with a `workflow.yaml` is a team; there is no registry. docker-agent never reads this file.
 
 ```yaml
-name: issue-team                 # what you type after daw; unique
-description: One line for `daw list` and the picker
+name: issue-team                 # what you type after j5; unique
+description: One line for `j5 list` and the picker
 team: team.yaml                  # the docker-agent config, relative to this file
 path: [bin]                      # directories prepended to PATH (script tools call helpers by name)
 

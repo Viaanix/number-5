@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const TEMPORARY_DIRECTORY_PREFIX = "daw-test-";
+const TEMPORARY_DIRECTORY_PREFIX = "j5-test-";
 
 /** Default branch of fixture repositories; deliberately not "master" or the git default. */
 export const FIXTURE_DEFAULT_BRANCH = "trunk";
@@ -36,14 +36,7 @@ export function removeTemporaryDirectories(): void {
  */
 export function runGit(workingDirectory: string, gitArguments: string[]): string {
   const completedProcess = Bun.spawnSync(
-    [
-      "git",
-      "-c",
-      "user.name=daw test",
-      "-c",
-      "user.email=daw-test@example.invalid",
-      ...gitArguments,
-    ],
+    ["git", "-c", "user.name=j5 test", "-c", "user.email=j5-test@example.invalid", ...gitArguments],
     { cwd: workingDirectory, stdout: "pipe", stderr: "pipe" },
   );
   if (completedProcess.exitCode !== 0) {

@@ -1,16 +1,16 @@
-# docker-agent-workflows
+# number-5
 
-Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/docker-agent), plus `daw`, a launcher that starts any team against any project checkout.
+Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/docker-agent), plus `j5`, a launcher that starts any team against any project checkout.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `<team>/` | One team per top-level directory: `team.yaml` (docker-agent), `workflow.yaml` (launcher manifest), `instructions/`, `bin/`. `issue-team/` is the reference team |
-| `launcher/src/` | The `daw` CLI (Bun + TypeScript). `cli.ts` is the entry; `plan.ts` builds the docker-agent command and has no side effects |
+| `launcher/src/` | The `j5` CLI (Bun + TypeScript). `cli.ts` is the entry; `plan.ts` builds the docker-agent command and has no side effects |
 | `launcher/test/` | bun:test tests; real temporary git repositories, no module mocks |
 | `skills/` | Agent skills shipped with the teams (`j5-test-quality`); the installer copies them to `~/.agents/skills/` |
-| `bin/daw` | Shim the alias points at |
+| `bin/j5` | Shim the alias points at |
 | `scripts/` | `install.ts` (link + shell alias/function, all OSes), `lint-shell.sh`, `validate-teams.ts` |
 | `tests/` | bun:test tests for `scripts/` |
 | `docs/` | docker-agent knowledge (reference, patterns, gotchas), launcher and new-team guides |
@@ -28,7 +28,7 @@ bun run test         # bun test --timeout=30000 (launcher; spawn-heavy tests tak
 bun run validate:teams   # manifests, agents, configs, flavors, dry runs against the installed docker-agent
 ```
 
-`check` passing is necessary, not sufficient. For a launcher change, run the affected path: `bin/daw <team> <entrypoint> … --print`, then `… -- --dry-run --exec` in a scratch repository. For a team change, `validate:teams` plus a real run on a throwaway repository.
+`check` passing is necessary, not sufficient. For a launcher change, run the affected path: `bin/j5 <team> <entrypoint> … --print`, then `… -- --dry-run --exec` in a scratch repository. For a team change, `validate:teams` plus a real run on a throwaway repository.
 
 ## Conventions
 

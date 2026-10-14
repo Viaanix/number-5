@@ -58,4 +58,4 @@ Each entry point runs in its own worktree under `~/.cagent/worktrees/`, named af
 ## Effort
 
 ### Effort is a flavor
-A team defines its effort levels as `flavors:` in `team.yaml` — cheaper models for the native agents, a lower `harness.effort` for the Claude Code builder — and `daw --effort <flavor>` selects one. No flavor means the file as written. Keep each flavor minimal (flavors deep-merge) and let `validate:teams` prove it changes something.
+A team defines its effort levels as `flavors:` in `team.yaml` — cheaper models for the native agents, a lower `harness.effort` for the Claude Code builder — and `j5 --effort <flavor>` selects one. No flavor means the file as written. Keep each flavor minimal (flavors deep-merge) and let `validate:teams` prove it changes something.

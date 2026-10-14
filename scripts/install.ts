@@ -1,8 +1,8 @@
-// Installs the `daw` launcher for the current user, on Linux, macOS and Windows:
-//   1. a link to this repository in the home directory (default ~/docker-agent-workflows):
+// Installs the `j5` launcher for the current user, on Linux, macOS and Windows:
+//   1. a link to this repository in the home directory (default ~/number-5):
 //      a symlink on Linux and macOS, a directory junction on Windows (no admin rights
 //      needed). The alias goes through it, so moving the clone only needs a re-run;
-//   2. a `daw` alias (bash, zsh) or function (PowerShell) in the shell's startup file,
+//   2. a `j5` alias (bash, zsh) or function (PowerShell) in the shell's startup file,
 //      inside marker lines so re-running replaces it instead of adding a second copy;
 //   3. this repository's skills (skills/<name>) copied to ~/.agents/skills/<name>, where
 //      docker-agent finds them. Copied, not linked: docker-agent skips symlinked skill
@@ -34,11 +34,11 @@ import { quoteForPosixShell, quoteForPowerShell } from "../launcher/src/shell-qu
 
 /** Marker lines around the installed block. Unchanged from the bash installer, so
  * blocks it wrote are found and replaced. */
-export const BLOCK_BEGIN_MARKER = "# >>> docker-agent-workflows launcher >>>";
-export const BLOCK_END_MARKER = "# <<< docker-agent-workflows launcher <<<";
+export const BLOCK_BEGIN_MARKER = "# >>> number-5 launcher >>>";
+export const BLOCK_END_MARKER = "# <<< number-5 launcher <<<";
 
-const DEFAULT_LINK_NAME = "docker-agent-workflows";
-const DEFAULT_ALIAS_NAME = "daw";
+const DEFAULT_LINK_NAME = "number-5";
+const DEFAULT_ALIAS_NAME = "j5";
 // A word every supported shell accepts as an alias or function name.
 const ALIAS_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const LAUNCHER_ENTRY_RELATIVE_PATH = join("launcher", "src", "cli.ts");
@@ -48,7 +48,7 @@ const SUPPORTED_SHELLS = ["bash", "zsh", "powershell"] as const;
 const INSTALLED_SKILLS_RELATIVE_DIRECTORY = join(".agents", "skills");
 const SKILLS_SOURCE_DIRECTORY_NAME = "skills";
 /** Written into each skill copy; only directories holding it are replaced or removed. */
-export const INSTALLED_SKILL_MARKER_FILE = ".installed-by-docker-agent-workflows";
+export const INSTALLED_SKILL_MARKER_FILE = ".installed-by-number-5";
 
 /** A shell whose startup file the installer knows how to write. */
 export type SupportedShell = (typeof SUPPORTED_SHELLS)[number];
@@ -140,7 +140,7 @@ export function chooseProfilePath(
 }
 
 /**
- * The lines between the markers. bash and zsh get an alias to bin/daw through the link;
+ * The lines between the markers. bash and zsh get an alias to bin/j5 through the link;
  * PowerShell gets a function that runs bun directly (a .cmd in between would make
  * Ctrl-C in the agent ask "Terminate batch job (Y/N)?").
  */
@@ -149,7 +149,7 @@ export function buildBlockBody(shell: SupportedShell, aliasName: string, linkPat
     const launcherPath = quoteForPowerShell(join(linkPath, LAUNCHER_ENTRY_RELATIVE_PATH));
     return `function ${aliasName} { & bun ${launcherPath} @args }`;
   }
-  return `alias ${aliasName}=${quoteForPosixShell(join(linkPath, "bin", "daw"))}`;
+  return `alias ${aliasName}=${quoteForPosixShell(join(linkPath, "bin", "j5"))}`;
 }
 
 /** Returns the text with every marked block removed, markers included. */
@@ -228,7 +228,7 @@ function copySkill(placement: SkillPlacement): void {
   cpSync(placement.sourcePath, placement.installedPath, { recursive: true });
   writeFileSync(
     join(placement.installedPath, INSTALLED_SKILL_MARKER_FILE),
-    `Copied from ${placement.sourcePath} by docker-agent-workflows scripts/install.ts.\nRe-run the installer to refresh; edits here are overwritten.\n`,
+    `Copied from ${placement.sourcePath} by number-5 scripts/install.ts.\nRe-run the installer to refresh; edits here are overwritten.\n`,
   );
 }
 

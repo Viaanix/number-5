@@ -1,4 +1,4 @@
-// End-to-end tests of `daw` against the real issue-team manifest in this repository.
+// End-to-end tests of `j5` against the real issue-team manifest in this repository.
 // stdin is a pipe, so the launcher never prompts: every missing value is an error.
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
@@ -44,7 +44,7 @@ function canonicalPath(path: string): string {
 }
 
 // The beginning of the printed command, up to and including the PATH prefix, in the
-// dialect daw uses on this platform.
+// dialect j5 uses on this platform.
 function expectedCommandPrefix(projectRoot: string): string {
   if (RUNNING_ON_WINDOWS) {
     return `Set-Location -LiteralPath ${quoteForPowerShell(canonicalPath(projectRoot))}; $env:Path = ${quoteForPowerShell(`${ISSUE_TEAM_BIN};`)} + $env:Path; & `;
@@ -75,7 +75,7 @@ function runCli(
   };
 }
 
-describe("daw --print", () => {
+describe("j5 --print", () => {
   test("work-issue: worktree named after the repository, from the remote default branch", () => {
     const { projectRoot } = createFixtureProject("print-app");
     const result = runCli(["issue-team", "work-issue", "--issue", "12", "--print"], projectRoot);
@@ -125,7 +125,7 @@ describe("daw --print", () => {
   });
 });
 
-// Runs daw attached to a pseudo-terminal (Bun.Terminal), so the launcher believes it
+// Runs j5 attached to a pseudo-terminal (Bun.Terminal), so the launcher believes it
 // may prompt. A launcher stuck at a prompt is killed after the timeout, well inside
 // bun test's default 5 s per-test limit, and reported as timedOut.
 const TERMINAL_RUN_TIMEOUT_MILLISECONDS = 3000;
@@ -167,7 +167,7 @@ async function runCliInTerminal(
   };
 }
 
-describe("daw in a terminal", () => {
+describe("j5 in a terminal", () => {
   test("uses the repository around the current directory without asking for it", async () => {
     const { projectRoot } = createFixtureProject("terminal-app");
     const subdirectory = join(projectRoot, "src", "deep");
@@ -193,7 +193,7 @@ describe("daw in a terminal", () => {
   });
 });
 
-describe("daw usage errors", () => {
+describe("j5 usage errors", () => {
   // Every case here exits before touching the repository, so they share one fixture;
   // building one per case cost about 8 git processes each, which is slow on Windows.
   let usageProjectRoot = "";
@@ -222,8 +222,8 @@ describe("daw usage errors", () => {
     [["no-such-team"], "no team named 'no-such-team'; teams: issue-team"],
     [["issue-team", "deploy"], "team 'issue-team' has no entry point 'deploy'"],
     [["issue-team", "work-issue", "12"], "unexpected arguments: 12; parameters are flags"],
-    [[], "name a team, or run daw in a terminal to pick one"],
-  ])("daw %p exits 2 with a specific message", (cliArguments, expectedMessage) => {
+    [[], "name a team, or run j5 in a terminal to pick one"],
+  ])("j5 %p exits 2 with a specific message", (cliArguments, expectedMessage) => {
     const result = runCli([...cliArguments, "--print"], usageProjectRoot);
     expect(result.exitCode).toBe(EXIT_CODE_USAGE);
     expect(result.standardOutput).toBe("");
@@ -240,7 +240,7 @@ describe("daw usage errors", () => {
   });
 });
 
-describe("daw launching", () => {
+describe("j5 launching", () => {
   test("runs docker in the project with the team's bin first on PATH and returns its exit code", () => {
     const { projectRoot } = createFixtureProject("launch-app");
     const fakeBinDirectory = createTemporaryDirectory();
@@ -275,11 +275,11 @@ describe("daw launching", () => {
       ],
     });
     // Without prompts there is no confirmation, so the command is echoed as a receipt.
-    expect(result.standardError).toStartWith(`daw: ${expectedCommandPrefix(projectRoot)}`);
+    expect(result.standardError).toStartWith(`j5: ${expectedCommandPrefix(projectRoot)}`);
   });
 });
 
-describe("daw list and help", () => {
+describe("j5 list and help", () => {
   test("list shows each issue-team entry point with its parameter, and the efforts", () => {
     const result = runCli(["list"], createTemporaryDirectory());
     expect(result.exitCode).toBe(0);

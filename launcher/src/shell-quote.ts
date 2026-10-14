@@ -1,4 +1,4 @@
-// Renders a launch plan as one command line in the user's shell, so `daw --print`
+// Renders a launch plan as one command line in the user's shell, so `j5 --print`
 // output can be read, pasted into a terminal, and compared exactly in tests.
 // POSIX shells (bash, zsh) on Linux and macOS; PowerShell on Windows.
 

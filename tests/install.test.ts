@@ -1,6 +1,6 @@
 // Tests for scripts/install.ts. Every test uses a temporary home directory; most link
 // to a stand-in repository directory so no test can reach the real checkout through a
-// link. The end-to-end test links the real repository and runs `daw list` through a
+// link. The end-to-end test links the real repository and runs `j5 list` through a
 // real shell on each OS.
 
 import { afterAll, describe, expect, test } from "bun:test";
@@ -46,7 +46,7 @@ afterAll(() => {
 });
 
 function createTemporaryDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "daw-install-test-"));
+  const directory = mkdtempSync(join(tmpdir(), "j5-install-test-"));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -81,7 +81,7 @@ function createSandbox(overrides: Partial<InstallerEnvironment> = {}): Sandbox {
   return {
     homeDirectory,
     repositoryRoot,
-    linkPath: join(homeDirectory, "docker-agent-workflows"),
+    linkPath: join(homeDirectory, "number-5"),
     dependencyInstalls,
     environment: {
       platform: "linux",
@@ -101,7 +101,7 @@ function install(sandbox: Sandbox, options: Partial<InstallerOptions> = {}): str
     {
       repositoryRoot: sandbox.repositoryRoot,
       linkPath: undefined,
-      aliasName: "daw",
+      aliasName: "j5",
       shell: undefined,
       profilePath: undefined,
       dryRun: false,
@@ -129,7 +129,7 @@ describe("runInstaller — install", () => {
     expect(lstatSync(sandbox.linkPath).isSymbolicLink()).toBe(true);
     expect(realpathSync.native(sandbox.linkPath)).toBe(realpathSync.native(sandbox.repositoryRoot));
     expect(readAliases(sandbox)).toBe(
-      `${USER_ALIAS_LINE}\n${BLOCK_BEGIN_MARKER}\nalias daw=${quoteForPosixShell(join(sandbox.linkPath, "bin", "daw"))}\n${BLOCK_END_MARKER}\n`,
+      `${USER_ALIAS_LINE}\n${BLOCK_BEGIN_MARKER}\nalias j5=${quoteForPosixShell(join(sandbox.linkPath, "bin", "j5"))}\n${BLOCK_END_MARKER}\n`,
     );
   });
 
@@ -145,14 +145,14 @@ describe("runInstaller — install", () => {
     install(sandbox);
     install(sandbox, { aliasName: "agents" });
     expect(readAliases(sandbox)).toContain("alias agents=");
-    expect(readAliases(sandbox)).not.toContain("alias daw=");
+    expect(readAliases(sandbox)).not.toContain("alias j5=");
   });
 
   test("replaces a block written by the earlier bash installer", () => {
     const sandbox = createSandbox();
     writeFileSync(
       join(sandbox.homeDirectory, ".bash_aliases"),
-      `${USER_ALIAS_LINE}\n${BLOCK_BEGIN_MARKER}\nalias daw=/old/place/bin/daw\n${BLOCK_END_MARKER}\n`,
+      `${USER_ALIAS_LINE}\n${BLOCK_BEGIN_MARKER}\nalias j5=/old/place/bin/j5\n${BLOCK_END_MARKER}\n`,
     );
     install(sandbox);
     expect(readAliases(sandbox)).not.toContain("/old/place");
@@ -199,7 +199,7 @@ describe("runInstaller — install", () => {
 
   test("rejects an alias name that is not a shell word", () => {
     const sandbox = createSandbox();
-    expect(() => install(sandbox, { aliasName: "daw; rm -rf ~" })).toThrow("must match");
+    expect(() => install(sandbox, { aliasName: "j5; rm -rf ~" })).toThrow("must match");
   });
 });
 
@@ -313,21 +313,17 @@ describe("chooseProfilePath", () => {
 });
 
 describe("block text", () => {
-  test("posix alias goes through the link to bin/daw", () => {
+  test("posix alias goes through the link to bin/j5", () => {
     // join() gives backslashes on Windows, which POSIX quoting then quotes.
-    const linkPath = join("home", "me", "docker-agent-workflows");
-    expect(buildBlockBody("zsh", "daw", linkPath)).toBe(
-      `alias daw=${quoteForPosixShell(join(linkPath, "bin", "daw"))}`,
+    const linkPath = join("home", "me", "number-5");
+    expect(buildBlockBody("zsh", "j5", linkPath)).toBe(
+      `alias j5=${quoteForPosixShell(join(linkPath, "bin", "j5"))}`,
     );
   });
 
   test("PowerShell function runs bun on the launcher and forwards its arguments", () => {
-    const body = buildBlockBody(
-      "powershell",
-      "daw",
-      join("C:", "Users", "me", "docker-agent-workflows"),
-    );
-    expect(body).toStartWith("function daw { & bun ");
+    const body = buildBlockBody("powershell", "j5", join("C:", "Users", "me", "number-5"));
+    expect(body).toStartWith("function j5 { & bun ");
     expect(body).toEndWith(" @args }");
     expect(body).toContain(join("launcher", "src", "cli.ts"));
   });
@@ -347,17 +343,17 @@ describe("block text", () => {
 });
 
 // End to end: install for the real repository into a temporary home, then start the
-// shell the user would use, load the startup file, and run `daw list`.
+// shell the user would use, load the startup file, and run `j5 list`.
 describe("installed command runs in a real shell", () => {
-  test("daw list works through the installed alias or function", () => {
+  test("j5 list works through the installed alias or function", () => {
     const homeDirectory = createTemporaryDirectory();
     const shell = RUNNING_ON_WINDOWS ? "powershell" : "bash";
     const profilePath = join(homeDirectory, RUNNING_ON_WINDOWS ? "profile.ps1" : ".bash_aliases");
     runInstaller(
       {
         repositoryRoot: REPOSITORY_ROOT,
-        linkPath: join(homeDirectory, "docker-agent-workflows"),
-        aliasName: "daw",
+        linkPath: join(homeDirectory, "number-5"),
+        aliasName: "j5",
         shell,
         profilePath,
         dryRun: false,
@@ -374,8 +370,8 @@ describe("installed command runs in a real shell", () => {
       },
     );
     const shellCommand = RUNNING_ON_WINDOWS
-      ? ["pwsh", "-NoProfile", "-NonInteractive", "-Command", `. '${profilePath}'; daw list`]
-      : ["bash", "-c", `shopt -s expand_aliases; . '${profilePath}'\ndaw list`];
+      ? ["pwsh", "-NoProfile", "-NonInteractive", "-Command", `. '${profilePath}'; j5 list`]
+      : ["bash", "-c", `shopt -s expand_aliases; . '${profilePath}'\nj5 list`];
     const completedProcess = Bun.spawnSync(shellCommand, { stdin: "ignore" });
     expect({
       exitCode: completedProcess.exitCode,

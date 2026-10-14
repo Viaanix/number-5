@@ -24,9 +24,9 @@ my-team/
 6. **Check it:**
    ```bash
    bun run validate:teams                       # manifest rules, agents exist, configs parse, flavors change something, dry runs
-   daw list                                     # it shows up
-   daw my-team <entrypoint> --<param> … --print # the command is what you expect
-   daw my-team <entrypoint> --<param> … -- --dry-run --exec   # docker-agent initializes it for real
+   j5 list                                     # it shows up
+   j5 my-team <entrypoint> --<param> … --print # the command is what you expect
+   j5 my-team <entrypoint> --<param> … -- --dry-run --exec   # docker-agent initializes it for real
    ```
 7. **Run it for real** on a throwaway repository before pointing it at a project you care about.
 8. **Write down what surprised you** in [docker-agent/gotchas.md](docker-agent/gotchas.md), with the receipt. A pattern a second team copies goes in [docker-agent/patterns.md](docker-agent/patterns.md).
