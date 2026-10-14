@@ -2,7 +2,7 @@
 // stdin is a pipe, so the launcher never prompts: every missing value is an error.
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -193,6 +193,13 @@ describe("daw in a terminal", () => {
 });
 
 describe("daw usage errors", () => {
+  // Every case here exits before touching the repository, so they share one fixture;
+  // building one per case cost about 8 git processes each, which is slow on Windows.
+  let usageProjectRoot = "";
+  beforeAll(() => {
+    usageProjectRoot = createFixtureProject("usage-app").projectRoot;
+  });
+
   test.each([
     [
       ["issue-team", "work-issue", "--issue", "12", "--effort", "lwo"],
@@ -216,8 +223,7 @@ describe("daw usage errors", () => {
     [["issue-team", "work-issue", "12"], "unexpected arguments: 12; parameters are flags"],
     [[], "name a team, or run daw in a terminal to pick one"],
   ])("daw %p exits 2 with a specific message", (cliArguments, expectedMessage) => {
-    const { projectRoot } = createFixtureProject("usage-app");
-    const result = runCli([...cliArguments, "--print"], projectRoot);
+    const result = runCli([...cliArguments, "--print"], usageProjectRoot);
     expect(result.exitCode).toBe(EXIT_CODE_USAGE);
     expect(result.standardOutput).toBe("");
     expect(result.standardError).toContain(expectedMessage);

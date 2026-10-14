@@ -9,7 +9,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint:shell": "bash scripts/lint-shell.sh",
-    "test": "bun test",
+    "test": "bun test --timeout=30000",
     "test:shell": "bats tests",
     "validate:teams": "bun scripts/validate-teams.ts",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run lint:shell && bun run test && bun run test:shell && bun run validate:teams"

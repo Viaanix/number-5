@@ -23,7 +23,7 @@ bun run typecheck    # tsc --noEmit
 bun run lint         # oxlint --deny-warnings (.oxlintrc.json), type-aware via oxlint-tsgolint; lint:fix applies fixes and formats
 bun run format:check # oxfmt --check (.oxfmtrc.json); `bun run format` writes
 bun run lint:shell   # shellcheck on every shell script, found by shebang and *.sh / *.bats
-bun run test         # bun test (launcher)
+bun run test         # bun test --timeout=30000 (launcher; spawn-heavy tests take seconds on Windows)
 bun run test:shell   # bats tests
 bun run validate:teams   # manifests, agents, configs, flavors, dry runs against the installed docker-agent
 ```
