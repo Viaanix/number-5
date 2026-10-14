@@ -10,6 +10,7 @@
 import { basename, resolve } from "node:path";
 
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
+import { readPathValue, withPathValue } from "./environment.ts";
 import {
   inspectPullRequestWorktree,
   listRemoteBranches,
@@ -28,7 +29,7 @@ import {
   LaunchCancelledError,
   showNote,
 } from "./prompts.ts";
-import { renderPlanAsShellCommand } from "./shell-quote.ts";
+import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
 import { discoverTeams } from "./teams.ts";
 
@@ -287,11 +288,24 @@ async function collectParameterValues(
 }
 
 async function runPlan(plan: LaunchPlan): Promise<number> {
+  const [commandName, ...commandArguments] = plan.commandWords;
+  if (commandName === undefined) {
+    throw new Error("the launch plan has no command");
+  }
+  // Resolve the executable against the PATH the child will get, including Windows
+  // PATHEXT lookup (docker → docker.exe), so a missing docker is reported by name
+  // instead of as a spawn error.
+  const executablePath = Bun.which(commandName, { PATH: plan.pathEnvironment });
+  if (executablePath === null) {
+    throw new Error(
+      `'${commandName}' was not found on PATH; is Docker with the docker agent plugin installed?`,
+    );
+  }
   let childProcess: Bun.Subprocess;
   try {
-    childProcess = Bun.spawn(plan.commandWords, {
+    childProcess = Bun.spawn([executablePath, ...commandArguments], {
       cwd: plan.workingDirectory,
-      env: { ...process.env, PATH: plan.pathEnvironment },
+      env: withPathValue(process.env, plan.pathEnvironment),
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
@@ -384,9 +398,13 @@ async function launch(
     baseRef,
     pullRequestWorktree,
     passthroughArguments: parsedArguments.passthroughArguments,
-    inheritedPath: process.env.PATH ?? "",
+    inheritedPath: readPathValue(process.env),
   });
-  const commandLine = renderPlanAsShellCommand(plan, team.pathDirectories);
+  const commandLine = renderPlanAsShellCommand(
+    plan,
+    team.pathDirectories,
+    shellDialectForPlatform(process.platform),
+  );
 
   if (parsedArguments.switches.has("print")) {
     console.log(commandLine);

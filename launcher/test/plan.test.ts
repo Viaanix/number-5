@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { delimiter } from "node:path";
 
 import type { WorkflowManifest } from "../src/manifest.ts";
 import { buildLaunchPlan, type LaunchRequest } from "../src/plan.ts";
@@ -73,7 +74,7 @@ describe("buildLaunchPlan — new worktree", () => {
         "Work issue #12",
       ],
       workingDirectory: PROJECT_ROOT,
-      pathEnvironment: `${TEAM_BIN_DIRECTORY}:${INHERITED_PATH}`,
+      pathEnvironment: `${TEAM_BIN_DIRECTORY}${delimiter}${INHERITED_PATH}`,
     });
   });
 

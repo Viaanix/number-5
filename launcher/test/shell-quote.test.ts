@@ -1,30 +1,91 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 
-import { quoteForShell, renderPlanAsShellCommand } from "../src/shell-quote.ts";
+import {
+  quoteForPosixShell,
+  quoteForPowerShell,
+  renderPlanAsShellCommand,
+  shellDialectForPlatform,
+} from "../src/shell-quote.ts";
 
-// Runs the quoted word through a real bash and returns what bash hands to printf,
-// so the tests check quoting against the shell rather than against our own idea of it.
-function roundTripThroughBash(word: string): string {
-  const completedProcess = Bun.spawnSync(["bash", "-c", `printf %s ${quoteForShell(word)}`]);
-  return completedProcess.stdout.toString();
+const PRINT_ARGUMENTS_SCRIPT = join(import.meta.dir, "fixtures", "print-arguments.ts");
+
+// Words that exercise each dialect's special characters.
+const AWKWARD_WORDS = [
+  "Work issue #12",
+  "it's done",
+  "$HOME and `whoami` and $(id)",
+  "",
+  "line one\nline two",
+  "a'b\"c\\d",
+  "a,b",
+  "@splat",
+  "100%",
+  "x;y",
+  "C:\\Users\\me\\my repo",
+];
+
+// Runs a real shell on a command line that passes the quoted words to a program
+// printing its arguments, and returns the arguments the program received.
+function argumentsReceivedThroughShell(shellCommand: string[], quotedWords: string[]): string[] {
+  const commandLine = [quoteBun(shellCommand), ...quotedWords].join(" ");
+  const completedProcess = Bun.spawnSync([...shellCommand, commandLine]);
+  const parsed: unknown = JSON.parse(completedProcess.stdout.toString());
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new Error(`unexpected output: ${completedProcess.stdout.toString()}`);
+  }
+  return parsed;
 }
 
-describe("quoteForShell", () => {
+// The program part of the command line: `bun <script>`, quoted for the shell in use.
+function quoteBun(shellCommand: string[]): string {
+  if (shellCommand[0] === "bash") {
+    return `bun ${quoteForPosixShell(PRINT_ARGUMENTS_SCRIPT)}`;
+  }
+  return `& bun ${quoteForPowerShell(PRINT_ARGUMENTS_SCRIPT)}`;
+}
+
+// The posix dialect is only rendered on Linux and macOS, where bash is always present.
+describe.skipIf(process.platform === "win32")("quoteForPosixShell", () => {
   test("leaves flags, refs and paths unquoted", () => {
-    expect(quoteForShell("--worktree=app-issue-12")).toBe("--worktree=app-issue-12");
-    expect(quoteForShell("origin/feature/login")).toBe("origin/feature/login");
+    expect(quoteForPosixShell("--worktree=app-issue-12")).toBe("--worktree=app-issue-12");
+    expect(quoteForPosixShell("origin/feature/login")).toBe("origin/feature/login");
   });
 
-  test.each([
-    "Work issue #12",
-    "it's done",
-    "$HOME and `whoami` and $(id)",
-    "",
-    "line one\nline two",
-    "a'b\"c\\d",
-  ])("bash reads the quoted form of %p back unchanged", (word) => {
-    expect(roundTripThroughBash(word)).toBe(word);
+  test("bash passes every awkward word through unchanged", () => {
+    expect(
+      argumentsReceivedThroughShell(["bash", "-c"], AWKWARD_WORDS.map(quoteForPosixShell)),
+    ).toEqual(AWKWARD_WORDS);
   });
+});
+
+// PowerShell is rendered on Windows, but pwsh also runs on Linux and macOS. The CI
+// runners for all three have it, so in CI a missing pwsh fails instead of skipping.
+const powerShellPath = Bun.which("pwsh");
+const powerShellRequired = process.env.CI === "true";
+
+describe("quoteForPowerShell", () => {
+  test("leaves flags and Windows paths unquoted", () => {
+    expect(quoteForPowerShell("--worktree=app-issue-12")).toBe("--worktree=app-issue-12");
+    expect(quoteForPowerShell("C:\\Users\\me\\repo")).toBe("C:\\Users\\me\\repo");
+  });
+
+  test("quotes commas and a leading @, which PowerShell would turn into arrays and splats", () => {
+    expect(quoteForPowerShell("a,b")).toBe("'a,b'");
+    expect(quoteForPowerShell("@splat")).toBe("'@splat'");
+  });
+
+  test.skipIf(powerShellPath === null && !powerShellRequired)(
+    "pwsh passes every awkward word through unchanged",
+    () => {
+      expect(
+        argumentsReceivedThroughShell(
+          ["pwsh", "-NoProfile", "-NonInteractive", "-Command"],
+          AWKWARD_WORDS.map(quoteForPowerShell),
+        ),
+      ).toEqual(AWKWARD_WORDS);
+    },
+  );
 });
 
 describe("renderPlanAsShellCommand", () => {
@@ -34,15 +95,34 @@ describe("renderPlanAsShellCommand", () => {
     pathEnvironment: "/teams/x/bin:/usr/bin",
   };
 
-  test("prepends only the team's directories to PATH and quotes words that need it", () => {
-    expect(renderPlanAsShellCommand(plan, ["/teams/x/bin"])).toBe(
+  test("posix: prepends only the team's directories to PATH and quotes words that need it", () => {
+    expect(renderPlanAsShellCommand(plan, ["/teams/x/bin"], "posix")).toBe(
       `cd '/home/me/my app' && PATH=/teams/x/bin:"$PATH" docker agent run /teams/x/team.yaml 'Work issue #12'`,
     );
   });
 
-  test("omits the PATH assignment when the team adds no directories", () => {
-    expect(renderPlanAsShellCommand(plan, [])).toBe(
+  test("posix: omits the PATH assignment when the team adds no directories", () => {
+    expect(renderPlanAsShellCommand(plan, [], "posix")).toBe(
       `cd '/home/me/my app' && docker agent run /teams/x/team.yaml 'Work issue #12'`,
     );
+  });
+
+  test("powershell: Set-Location, $env:Path prepended with ;, and & before the command", () => {
+    const windowsPlan = {
+      commandWords: ["docker", "agent", "run", "C:\\teams\\x\\team.yaml", "Work issue #12"],
+      workingDirectory: "C:\\Users\\me\\my app",
+      pathEnvironment: "C:\\teams\\x\\bin;C:\\Windows",
+    };
+    expect(renderPlanAsShellCommand(windowsPlan, ["C:\\teams\\x\\bin"], "powershell")).toBe(
+      `Set-Location -LiteralPath 'C:\\Users\\me\\my app'; $env:Path = 'C:\\teams\\x\\bin;' + $env:Path; & docker agent run C:\\teams\\x\\team.yaml 'Work issue #12'`,
+    );
+  });
+});
+
+describe("shellDialectForPlatform", () => {
+  test("uses PowerShell on Windows and POSIX syntax elsewhere", () => {
+    expect(shellDialectForPlatform("win32")).toBe("powershell");
+    expect(shellDialectForPlatform("darwin")).toBe("posix");
+    expect(shellDialectForPlatform("linux")).toBe("posix");
   });
 });

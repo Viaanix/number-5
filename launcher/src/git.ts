@@ -2,9 +2,9 @@
 // Everything here shells out synchronously; the launcher is interactive and does one
 // lookup at a time, so there is nothing to gain from async.
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * Where docker-agent v1.145.0 creates `--worktree` and `--worktree-pr` checkouts
@@ -41,7 +41,10 @@ export function resolveGitToplevel(path: string): string {
   if (result.exitCode !== SUCCESS_EXIT_CODE) {
     throw new Error(`project path ${path} is not inside a git repository`);
   }
-  return result.standardOutput;
+  // On Windows git prints `C:/Users/...` with forward slashes, while Node APIs may
+  // hand out 8.3 short names (`C:\Users\RUNNER~1\...`) for the same directory. The
+  // canonical native path makes both compare equal and look native in output.
+  return realpathSync.native(resolve(result.standardOutput));
 }
 
 /** Returns the URL of the `origin` remote, or undefined when there is none. */

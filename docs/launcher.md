@@ -33,7 +33,7 @@ daw issue-team closeout --pr 456 --print    # show the exact command, run nothin
 | `--base <ref>` | Ref a `new` worktree branches from. Only for `new` worktrees | The remote default branch (`origin/HEAD`, else `gh`) |
 | `--effort <flavor>` | A `flavors:` key from the team's `team.yaml`, passed as `--flavor` | None: the team as written |
 | `--<parameter> <value>` | The entry point's parameters, e.g. `--issue 123` | Asked for, or an error when not in a terminal |
-| `--print` | Print the command as one bash line instead of running it | |
+| `--print` | Print the command as one line instead of running it: bash/zsh syntax on Linux and macOS, PowerShell on Windows | |
 | `-- …` | Everything after a bare `--` is appended to `docker agent run` | |
 
 Anything missing is asked for when stdin and stdout are a terminal; otherwise it is an error (exit 2). When anything was asked, the command is shown and confirmed before it runs. Ctrl-C at a prompt exits 130 and launches nothing. Once docker-agent is running, Ctrl-C belongs to its TUI.

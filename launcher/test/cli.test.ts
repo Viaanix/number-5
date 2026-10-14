@@ -4,11 +4,13 @@
 
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "../src/arguments.ts";
 import { formatUsage } from "../src/cli.ts";
+import { readPathValue, withPathValue } from "../src/environment.ts";
+import { quoteForPosixShell, quoteForPowerShell } from "../src/shell-quote.ts";
 import {
   createFixtureProject,
   createTemporaryDirectory,
@@ -29,19 +31,41 @@ const EXIT_CODE_USAGE = 2;
 // A PR number no real ~/.cagent/worktrees/pr-<n> will have, so the state is "absent".
 const UNUSED_PULL_REQUEST_NUMBER = "987654321";
 
+const RUNNING_ON_WINDOWS = process.platform === "win32";
+
+// The exit code fixtures/fake-docker.ts ends with; the launcher must pass it through.
+const FAKE_DOCKER_EXIT_CODE = 7;
+
+// The canonical native form of a path, matching what the launcher prints (it
+// normalizes git's C:/... and Windows 8.3 short names the same way).
+function canonicalPath(path: string): string {
+  return realpathSync.native(path);
+}
+
+// The beginning of the printed command, up to and including the PATH prefix, in the
+// dialect daw uses on this platform.
+function expectedCommandPrefix(projectRoot: string): string {
+  if (RUNNING_ON_WINDOWS) {
+    return `Set-Location -LiteralPath ${quoteForPowerShell(canonicalPath(projectRoot))}; $env:Path = ${quoteForPowerShell(`${ISSUE_TEAM_BIN};`)} + $env:Path; & `;
+  }
+  return `cd ${quoteForPosixShell(canonicalPath(projectRoot))} && PATH=${quoteForPosixShell(ISSUE_TEAM_BIN)}:"$PATH" `;
+}
+
+const quoteForThisPlatform = RUNNING_ON_WINDOWS ? quoteForPowerShell : quoteForPosixShell;
+
 type CliResult = { exitCode: number; standardOutput: string; standardError: string };
 
 function runCli(
   cliArguments: string[],
   workingDirectory: string,
-  environment: Record<string, string> = {},
+  pathValue: string = readPathValue(process.env),
 ): CliResult {
   const completedProcess = Bun.spawnSync(["bun", CLI_PATH, ...cliArguments], {
     cwd: workingDirectory,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...environment },
+    env: withPathValue(process.env, pathValue),
   });
   return {
     exitCode: completedProcess.exitCode,
@@ -56,7 +80,7 @@ describe("daw --print", () => {
     const result = runCli(["issue-team", "work-issue", "--issue", "12", "--print"], projectRoot);
     expect(result).toEqual({
       exitCode: 0,
-      standardOutput: `cd ${realpathSync(projectRoot)} && PATH=${ISSUE_TEAM_BIN}:"$PATH" docker agent run ${ISSUE_TEAM_CONFIG} --agent root --worktree=print-app-issue-12 --worktree-base origin/${FIXTURE_DEFAULT_BRANCH} 'Work issue #12'`,
+      standardOutput: `${expectedCommandPrefix(projectRoot)}docker agent run ${quoteForThisPlatform(ISSUE_TEAM_CONFIG)} --agent root --worktree=print-app-issue-12 --worktree-base origin/${FIXTURE_DEFAULT_BRANCH} 'Work issue #12'`,
       standardError: "",
     });
   });
@@ -164,7 +188,7 @@ describe("daw in a terminal", () => {
     );
     expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
-    expect(result.screenText).toStartWith(`cd ${realpathSync(projectRoot)} && `);
+    expect(result.screenText).toContain(expectedCommandPrefix(projectRoot));
   });
 });
 
@@ -213,45 +237,40 @@ describe("daw launching", () => {
   test("runs docker in the project with the team's bin first on PATH and returns its exit code", () => {
     const { projectRoot } = createFixtureProject("launch-app");
     const fakeBinDirectory = createTemporaryDirectory();
-    const fakeDockerPath = join(fakeBinDirectory, "docker");
-    const FAKE_DOCKER_EXIT_CODE = 7;
-    // Records what the launcher actually spawned: working directory, where the
-    // issue-team helper resolves from on PATH, and each argument on its own line.
-    writeFileSync(
-      fakeDockerPath,
-      `#!/usr/bin/env bash
-echo "cwd=$PWD"
-echo "helper=$(command -v issue-team-base-ref)"
-printf 'arg=%s\\n' "$@"
-exit ${FAKE_DOCKER_EXIT_CODE}
-`,
-    );
-    chmodSync(fakeDockerPath, 0o755);
+    const fakeDockerScript = join(import.meta.dir, "fixtures", "fake-docker.ts");
+    // A launcher per OS for the same Bun script: `docker` for POSIX shells and exec,
+    // `docker.cmd` for Windows, where PATHEXT resolution finds it.
+    const posixLauncherPath = join(fakeBinDirectory, "docker");
+    writeFileSync(posixLauncherPath, `#!/bin/sh\nexec bun "${fakeDockerScript}" "$@"\n`);
+    chmodSync(posixLauncherPath, 0o755);
+    writeFileSync(join(fakeBinDirectory, "docker.cmd"), `@bun "${fakeDockerScript}" %*\r\n`);
 
-    // Started from an unrelated directory, so the cwd check proves the launcher moved
-    // into the project rather than inheriting the caller's directory.
+    // Started from an unrelated directory, so the working-directory check proves the
+    // launcher moved into the project rather than inheriting the caller's directory.
     const result = runCli(
       ["issue-team", "work-issue", "--issue", "5", "--project", projectRoot],
       createTemporaryDirectory(),
-      { PATH: `${fakeBinDirectory}:${process.env.PATH ?? ""}` },
+      `${fakeBinDirectory}${delimiter}${readPathValue(process.env)}`,
     );
 
     expect(result.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
-    expect(result.standardOutput.split("\n")).toEqual([
-      `cwd=${realpathSync(projectRoot)}`,
-      `helper=${join(ISSUE_TEAM_BIN, "issue-team-base-ref")}`,
-      "arg=agent",
-      "arg=run",
-      `arg=${ISSUE_TEAM_CONFIG}`,
-      "arg=--agent",
-      "arg=root",
-      "arg=--worktree=launch-app-issue-5",
-      "arg=--worktree-base",
-      `arg=origin/${FIXTURE_DEFAULT_BRANCH}`,
-      "arg=Work issue #5",
-    ]);
+    expect(JSON.parse(result.standardOutput)).toEqual({
+      workingDirectory: canonicalPath(projectRoot),
+      firstPathEntry: ISSUE_TEAM_BIN,
+      arguments: [
+        "agent",
+        "run",
+        ISSUE_TEAM_CONFIG,
+        "--agent",
+        "root",
+        "--worktree=launch-app-issue-5",
+        "--worktree-base",
+        `origin/${FIXTURE_DEFAULT_BRANCH}`,
+        "Work issue #5",
+      ],
+    });
     // Without prompts there is no confirmation, so the command is echoed as a receipt.
-    expect(result.standardError).toStartWith("daw: cd ");
+    expect(result.standardError).toStartWith(`daw: ${expectedCommandPrefix(projectRoot)}`);
   });
 });
 
