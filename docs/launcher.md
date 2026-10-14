@@ -2,18 +2,26 @@
 
 One command to start any team in this repository against any project checkout. It picks the team, entry point, project, base branch, effort and parameters — from flags, or by asking — and runs `docker agent run` with the team's helper scripts on `PATH`.
 
-Source: `launcher/src/` (start at `cli.ts`). Shim: `bin/daw`. Install: `scripts/install.sh`.
+Source: `launcher/src/` (start at `cli.ts`). Entry points: `bin/daw` (Linux, macOS), `bin/daw.cmd` (Windows). Install: `scripts/install.ts`.
 
 ## Install
 
 ```bash
-scripts/install.sh            # ~/docker-agent-workflows → this repo, alias daw in ~/.bash_aliases, bun install if needed
-scripts/install.sh --dry-run  # show what it would do
-scripts/install.sh --link ~/agents --alias agents   # other link path / alias name
-scripts/install.sh --uninstall
+bun scripts/install.ts                 # link + daw in your shell's startup file + bun install if needed
+bun scripts/install.ts --dry-run       # show what it would do
+bun scripts/install.ts --link ~/agents --alias agents   # other link path / command name
+bun scripts/install.ts --shell zsh     # configure another shell than $SHELL
+bun scripts/install.ts --uninstall
 ```
 
-The alias goes through the symlink, so moving the clone only needs a re-run of the installer. The alias block sits between `# >>> docker-agent-workflows launcher >>>` markers; re-running replaces it.
+| OS / shell | Link | Startup file | Command |
+|---|---|---|---|
+| Linux, bash | symlink | `~/.bash_aliases` if `~/.bashrc` sources it, else `~/.bashrc` | `alias daw=<link>/bin/daw` |
+| macOS, bash | symlink | `~/.bash_profile` | `alias daw=<link>/bin/daw` |
+| Linux/macOS, zsh | symlink | `~/.zshrc` | `alias daw=<link>/bin/daw` |
+| Windows, PowerShell | directory junction (no admin rights needed) | `$PROFILE` | `function daw { & bun <link>\launcher\src\cli.ts @args }` |
+
+The command goes through the link, so moving the clone only needs a re-run of the installer. `bin\daw.cmd` serves cmd.exe users on Windows; the PowerShell function calls bun directly so Ctrl-C inside the agent does not trigger cmd's "Terminate batch job (Y/N)?". The alias block sits between `# >>> docker-agent-workflows launcher >>>` markers; re-running replaces it.
 
 ## Use
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs shellcheck over every shell script in the repository: launcher shims,
-# installer, team helpers and sourced entry files, and the bats tests.
+# team helpers and sourced entry files.
 # Exits non-zero on any finding, including style and info levels.
 set -euo pipefail
 
@@ -10,7 +10,7 @@ cd "$repository_root"
 # Written for bash 3.2, which macOS ships as /bin/bash: no mapfile, and only POSIX
 # character classes in grep patterns (BSD grep has no GNU \b).
 
-# A shebang naming sh or bash, e.g. `#!/bin/sh` or `#!/usr/bin/env bash` (not bats).
+# A shebang naming sh or bash, e.g. `#!/bin/sh` or `#!/usr/bin/env bash`.
 readonly SHELL_SHEBANG_PATTERN='^#!.*[/ ](ba)?sh([[:space:]]|$)'
 
 list_files() {
@@ -38,15 +38,6 @@ if [[ ${#shell_files[@]} -eq 0 ]]; then
   exit 1
 fi
 
-# bats files are linted separately: shellcheck recognizes their `@test` syntax only
-# from the bats shebang, which --shell=bash (needed for the sourced *.sh files) overrides.
-bats_files=()
-while IFS= read -r bats_file; do
-  bats_files+=("$bats_file")
-done < <(list_files -name '*.bats' | sort)
 
-echo "shellcheck: ${#shell_files[@]} shell files, ${#bats_files[@]} bats files"
+echo "shellcheck: ${#shell_files[@]} shell files"
 shellcheck --severity=style --shell=bash --external-sources "${shell_files[@]}"
-if [[ ${#bats_files[@]} -gt 0 ]]; then
-  shellcheck --severity=style --external-sources "${bats_files[@]}"
-fi

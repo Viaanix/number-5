@@ -10,8 +10,8 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 | `launcher/src/` | The `daw` CLI (Bun + TypeScript). `cli.ts` is the entry; `plan.ts` builds the docker-agent command and has no side effects |
 | `launcher/test/` | bun:test tests; real temporary git repositories, no module mocks |
 | `bin/daw` | Shim the alias points at |
-| `scripts/` | `install.sh` (symlink + alias), `lint-shell.sh`, `validate-teams.ts` |
-| `tests/` | bats tests for the shell scripts |
+| `scripts/` | `install.ts` (link + shell alias/function, all OSes), `lint-shell.sh`, `validate-teams.ts` |
+| `tests/` | bun:test tests for `scripts/` |
 | `docs/` | docker-agent knowledge (reference, patterns, gotchas), launcher and new-team guides |
 
 ## Verification
@@ -22,9 +22,8 @@ bun run check        # everything below, in order; must exit 0
 bun run typecheck    # tsc --noEmit
 bun run lint         # oxlint --deny-warnings (.oxlintrc.json), type-aware via oxlint-tsgolint; lint:fix applies fixes and formats
 bun run format:check # oxfmt --check (.oxfmtrc.json); `bun run format` writes
-bun run lint:shell   # shellcheck on every shell script, found by shebang and *.sh / *.bats
+bun run lint:shell   # shellcheck on every shell script, found by shebang and *.sh (Linux/macOS)
 bun run test         # bun test --timeout=30000 (launcher; spawn-heavy tests take seconds on Windows)
-bun run test:shell   # bats tests
 bun run validate:teams   # manifests, agents, configs, flavors, dry runs against the installed docker-agent
 ```
 

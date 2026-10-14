@@ -34,8 +34,6 @@ jobs:
             "https://github.com/docker/docker-agent/releases/download/${DOCKER_AGENT_VERSION}/docker-agent-linux-amd64"
           chmod +x "$HOME/.docker/cli-plugins/docker-agent"
           docker agent version
-      - name: Install bats
-        run: sudo apt-get update -q && sudo apt-get install -y -q bats
       - run: bun install --frozen-lockfile
       - run: bun run check
         env:
@@ -52,8 +50,8 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      - name: Install shellcheck and bats
-        run: brew install shellcheck bats-core
+      - name: Install shellcheck
+        run: brew install shellcheck
       - name: Report shells
         run: |
           echo "SHELL=$SHELL"
@@ -75,9 +73,6 @@ jobs:
       - name: test
         if: ${{ !cancelled() }}
         run: bun run test
-      - name: test:shell
-        if: ${{ !cancelled() }}
-        run: bun run test:shell
 
   windows:
     runs-on: windows-latest
