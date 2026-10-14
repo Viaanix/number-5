@@ -40,9 +40,10 @@ export function quoteForPowerShell(word: string): string {
 }
 
 /**
- * Renders the plan as one command line:
- * - posix:      `cd <dir> && PATH=<dirs>:"$PATH" docker agent run ...`
- * - powershell: `Set-Location -LiteralPath <dir>; $env:Path = '<dirs>;' + $env:Path; docker agent run ...`
+ * Renders the plan as one command line, the worktree steps first when there are any:
+ * - posix:      `git ... && git ... && cd <dir> && PATH=<dirs>:"$PATH" docker agent run ...`
+ * - powershell: `& git ... && & git ... && & { Set-Location -LiteralPath <dir>; $env:Path = '<dirs>;' + $env:Path; & docker agent run ... }`
+ *   (without steps, just the part inside the braces; with steps it needs PowerShell 7+ for `&&`)
  * The team's helper directories are shown without the inherited PATH, which would
  * only add noise and machine-specific paths.
  */
@@ -55,18 +56,32 @@ export function renderPlanAsShellCommand(
     // `&` invokes the command name as a command even when it is quoted.
     const commandText = `& ${plan.commandWords.map(quoteForPowerShell).join(" ")}`;
     const changeDirectory = `Set-Location -LiteralPath ${quoteForPowerShell(plan.workingDirectory)}`;
-    if (teamPathDirectories.length === 0) {
-      return `${changeDirectory}; ${commandText}`;
+    let launchText = `${changeDirectory}; ${commandText}`;
+    if (teamPathDirectories.length > 0) {
+      const prependedPath = quoteForPowerShell(`${teamPathDirectories.join(";")};`);
+      launchText = `${changeDirectory}; $env:Path = ${prependedPath} + $env:Path; ${commandText}`;
     }
-    const prependedPath = quoteForPowerShell(`${teamPathDirectories.join(";")};`);
-    return `${changeDirectory}; $env:Path = ${prependedPath} + $env:Path; ${commandText}`;
+    if (plan.preparationSteps.length === 0) {
+      return launchText;
+    }
+    // `&&` (PowerShell 7+) stops at the first failed git step. The launch is a script
+    // block so the chain covers it whole: after `;`, PowerShell would run docker even
+    // when a step failed.
+    const stepTexts = plan.preparationSteps.map(
+      (stepWords) => `& ${stepWords.map(quoteForPowerShell).join(" ")}`,
+    );
+    return `${stepTexts.join(" && ")} && & { ${launchText} }`;
   }
 
   const commandText = plan.commandWords.map(quoteForPosixShell).join(" ");
   const changeDirectory = `cd ${quoteForPosixShell(plan.workingDirectory)}`;
-  if (teamPathDirectories.length === 0) {
-    return `${changeDirectory} && ${commandText}`;
+  let launchText = `${changeDirectory} && ${commandText}`;
+  if (teamPathDirectories.length > 0) {
+    const prependedPath = teamPathDirectories.map(quoteForPosixShell).join(":");
+    launchText = `${changeDirectory} && PATH=${prependedPath}:"$PATH" ${commandText}`;
   }
-  const prependedPath = teamPathDirectories.map(quoteForPosixShell).join(":");
-  return `${changeDirectory} && PATH=${prependedPath}:"$PATH" ${commandText}`;
+  const stepTexts = plan.preparationSteps.map((stepWords) =>
+    stepWords.map(quoteForPosixShell).join(" "),
+  );
+  return [...stepTexts, launchText].join(" && ");
 }

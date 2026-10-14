@@ -115,6 +115,25 @@ The conversation does carry over: two `--exec` turns of one harness agent with t
 
 **What does reach it:** the docker-agent process's `PATH`. With a team's `bin/` prepended (as `j5` does), the harness ran `test-quality-prescreen` by bare name through its own shell tool and got the helper's real output and exit code.
 
+### `--worktree` does not move a harness agent into the worktree
+
+**Observed:** v1.145.0 with Claude Code 2.1.284, 2026-10-14.
+
+**Receipt:** from a scratch clone on `main`, a harness agent asked to run `pwd; git branch --show-current`:
+```
+docker agent run plain.yaml --worktree=probe-cwd --worktree-base origin/main --exec "…"
+# → <the clone>  main            (the worktree was created, but Claude Code runs in the clone)
+docker agent run plain.yaml --working-dir ~/.cagent/worktrees/probe-cwd --exec "…"
+# → ~/.cagent/worktrees/probe-cwd  worktree-probe-cwd
+```
+The TUI header shows the worktree path either way. Seen in a real `work-issue` run too: the agent's first `pwd` printed the user's checkout, and Claude Code reset its shell to the checkout after every `cd` into the worktree.
+
+**Consequence:** with `--worktree` / `--worktree-pr`, a harness agent's edits and commits land in the user's checkout unless it `cd`s into the worktree on every command. `--working-dir <worktree>` puts it in the worktree.
+
+**Resuming does not remember it:** turn 1 with `-s <scratch db> --session <id> --working-dir <worktree>` printed the worktree; turn 2 with the same `--session <id>` and no `--working-dir`, started from the clone, printed the clone. Start a resumed session inside the worktree, or pass `--working-dir` again.
+
+**Mitigation:** `j5` creates worktrees itself, beside the checkout, and starts docker-agent in them with `--working-dir` (`launcher/src/plan.ts`).
+
 ### `debug config` is the canonical-config printer
 
 `docker agent debug config <team.yaml> [--flavor X]` prints the fully resolved configuration (instruction files inlined, defaults filled, flavor applied) and exits non-zero with a parse error on an invalid file. It is the fastest validity check there is, and diffing two of its outputs is how you see what a change really does.
@@ -176,7 +195,7 @@ The data directory, and with it `worktrees/`, is `<home>/.cagent` on every OS (`
 Carried over from `workflows/issue-team/README.md` ("Known limits") or reported without a receipt in this repository. Confirm one with a receipt, then move it up.
 
 - **The docs on docker.github.io track `main`**, not the release, and document flags v1.145.0 lacks (e.g. `--last`). Trust `docker agent <command> --help` over the website.
-- **PR worktrees are named `pr-<number>`** without the repository name, so the same PR number in two repositories collides under `~/.cagent/worktrees/`. `j5` refuses a `pr-<n>` worktree whose `origin` is another repository.
+- **docker-agent names PR worktrees `pr-<number>`** without the repository name, so the same PR number in two repositories collides under `~/.cagent/worktrees/`. `j5` no longer uses `--worktree-pr`; it creates `<repo>-pr-<n>` beside the checkout.
 - **Worktrees from `--exec` runs are never removed automatically.** Clean up with `git worktree list` / `git worktree remove <path>`.
 - **`permissions.deny` rules cover docker-agent's own shell tool only.** A `harness: claude-code` agent runs Claude Code's tools, outside those rules.
 - **Script tools resolve commands through the docker-agent process's `PATH`.** A helper that is not on `PATH` fails with "command not found" at call time, not at startup. `j5` prepends each team's `path:` directories.

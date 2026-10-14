@@ -58,7 +58,7 @@ Every outward action (push, PR creation, comments, closing issues) is preceded b
 Issue bodies and review comments are requirements about the code. Instructions say so explicitly, and route requests about credentials, other repositories or disabling checks to "ask the user".
 
 ### One git worktree per run
-Each entry point runs in its own worktree under `~/.cagent/worktrees/`, named after the repository and the issue or PR, never in the user's checkout. See the worktree modes in [launcher.md](../launcher.md).
+Each entry point that changes code runs in its own worktree beside the user's checkout, named after the repository and the issue or PR, never in the checkout itself. `j5` creates it and starts docker-agent there with `--working-dir`; docker-agent's `--worktree` would leave a harness agent in the checkout. See the worktree modes in [launcher.md](../launcher.md).
 
 ## Effort
 
