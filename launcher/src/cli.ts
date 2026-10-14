@@ -14,6 +14,7 @@
 import { basename, join, resolve } from "node:path";
 
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
+import { formatBanner } from "./banner.ts";
 import { readPathValue } from "./environment.ts";
 import {
   inspectWorktreePath,
@@ -98,14 +99,13 @@ function isTerminal(stream: PossiblyTerminalStream): boolean {
 
 // Johnny 5 flavor lines (Short Circuit, 1986), added on top of the real output and
 // never instead of it: the help, list and prompts must still read plainly without them.
-const HELP_GREETING = "j5 — Number 5 is alive.";
 const LIST_HEADER = "Input! Input!";
 const INTERACTIVE_BANNER = "Need input!";
 const PARAMETER_PROMPT_PREFIX = "Need input:";
 
 function formatUsage(): string {
   return [
-    HELP_GREETING,
+    formatBanner(),
     "",
     "Usage:",
     "  j5                                    pick everything interactively",
@@ -508,6 +508,7 @@ async function launch(
   }
 
   if (interaction.canPrompt && requestedTeamName === undefined) {
+    console.log(`${formatBanner()}\n`);
     showBanner(INTERACTIVE_BANNER);
   }
   const team = await chooseTeam(teams, requestedTeamName, interaction);
