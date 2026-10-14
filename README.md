@@ -26,4 +26,4 @@ daw                         # or pick everything interactively
 
 ## Development
 
-`bun run check` runs typecheck, oxlint, oxfmt, shellcheck, the bun tests and team validation. CI runs it on Linux, macOS and Windows. Details in [CLAUDE.md](CLAUDE.md).
+`bun run check` runs typecheck, oxlint, oxfmt, shellcheck, the bun tests and team validation. CI runs all of it on Linux; macOS runs everything except team validation; Windows runs typecheck, oxlint, oxfmt and the bun tests (`.github/workflows/check.yml`). Details in [CLAUDE.md](CLAUDE.md).

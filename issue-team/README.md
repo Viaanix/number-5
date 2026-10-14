@@ -60,7 +60,7 @@ Nothing in this directory names an absolute path. `team.yaml` resolves `instruct
 
 ## Setup
 
-1. Prerequisites: Docker with the `docker agent` plugin, `gh` (logged in), `claude` (logged in), `git`.
+1. Prerequisites: Docker with the `docker agent` plugin, `gh` (logged in), `claude` (logged in), `git`, and [Bun](https://bun.sh): the helpers in `bin/` run with it whenever an agent calls a tool.
 2. The `j5-test-quality` skill at `~/.agents/skills/j5-test-quality/`, which `bun scripts/install.ts` copies there from `skills/`. The tester and reviewer read its workflow files from that path; the tester's `test_prescreen` tool runs the repository's own copy of its pre-screen.
 3. Anthropic API key for the native agents. `docker agent setup` → Anthropic, or set `ANTHROPIC_API_KEY` in `~/.config/cagent/.env`. The builder uses your Claude login instead.
 4. Optional, bash and zsh only (`daw` replaces this on every OS): shell functions and helpers, in `~/.bashrc` (use wherever you cloned this directory):

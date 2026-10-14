@@ -111,6 +111,16 @@ ANTHROPIC_API_KEY=placeholder docker agent run issue-team/team.yaml --config-dir
 
 **Consequence:** installing a skill by linking `~/.agents/skills/<name>` to a checkout does not work; the skill must be copied, and re-copied after changes.
 
+### A skill that is not installed is silently dropped
+
+**Observed:** v1.145.0, 2026-10-14.
+
+**Receipt:** with `skills: [j5-test-quality]` in `issue-team/team.yaml` and no `~/.agents/skills/j5-test-quality`, `docker agent debug skills issue-team/team.yaml` prints `No skills for tester` / `No skills for reviewer` and exits 0; `docker agent run ... --agent tester --dry-run --exec` also exits 0.
+
+**Consequence:** an agent whose instructions depend on a skill runs without it, and neither a dry run nor `validate:teams` notices.
+
+**Mitigation:** run `bun scripts/install.ts` after pulling changes that add or rename a skill; check with `docker agent debug skills <team.yaml>`.
+
 ### Local skills get `read_skill`, but no `read_skill_file`
 
 **Observed:** v1.145.0, 2026-10-14.
