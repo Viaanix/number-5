@@ -100,8 +100,9 @@ describe("daw --print", () => {
 });
 
 // Runs daw inside a pseudo-terminal (util-linux `script`), so the launcher believes it
-// may prompt. `timeout` turns "stuck waiting at a prompt" into a non-zero exit.
-const TERMINAL_RUN_TIMEOUT_SECONDS = "10";
+// may prompt. `timeout` turns "stuck waiting at a prompt" into exit 124, well inside
+// bun test's default 5 s per-test limit.
+const TERMINAL_RUN_TIMEOUT_SECONDS = "3";
 const TIMEOUT_EXIT_CODE = 124;
 
 function runCliInTerminal(cliArguments: string[], workingDirectory: string): CliResult {

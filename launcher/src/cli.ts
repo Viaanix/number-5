@@ -188,21 +188,21 @@ async function chooseProjectRoot(
     }
     return resolveGitToplevel(resolve(requestedProjectPath));
   }
+  // Run from inside a checkout (any subdirectory), the project is that repository and
+  // nobody is asked. The resolved path still shows in the `cd ...` of the command the
+  // launcher prints or confirms, so a wrong guess is visible before anything runs.
   const currentDirectory = process.cwd();
-  const currentDirectoryIsProject = describeProjectPathProblem(currentDirectory) === undefined;
-  if (!interaction.canPrompt) {
-    if (!currentDirectoryIsProject) {
-      throw new UsageError(
-        "the current directory is not a git repository; pass --project <path> or cd into one",
-      );
-    }
+  if (describeProjectPathProblem(currentDirectory) === undefined) {
     return resolveGitToplevel(currentDirectory);
   }
+  if (!interaction.canPrompt) {
+    throw new UsageError(
+      "the current directory is not a git repository; pass --project <path> or cd into one",
+    );
+  }
   interaction.askedAnything = true;
-  const answer = await askForText(
-    "Project checkout (path to a git repository)",
-    (projectPath) => describeProjectPathProblem(projectPath),
-    currentDirectoryIsProject ? resolveGitToplevel(currentDirectory) : undefined,
+  const answer = await askForText("Project checkout (path to a git repository)", (projectPath) =>
+    describeProjectPathProblem(projectPath),
   );
   return resolveGitToplevel(resolve(answer));
 }

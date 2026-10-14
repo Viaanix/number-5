@@ -29,7 +29,7 @@ daw issue-team closeout --pr 456 --print    # show the exact command, run nothin
 
 | Option | Meaning | Default |
 |---|---|---|
-| `--project <path>` | Checkout the team works on; any path inside a git repository | The current directory's repository |
+| `--project <path>` | Checkout the team works on; any path inside a git repository | The repository around the current directory, any subdirectory; asked for only when you are not in one |
 | `--base <ref>` | Ref a `new` worktree branches from. Only for `new` worktrees | The remote default branch (`origin/HEAD`, else `gh`) |
 | `--effort <flavor>` | A `flavors:` key from the team's `team.yaml`, passed as `--flavor` | None: the team as written |
 | `--<parameter> <value>` | The entry point's parameters, e.g. `--issue 123` | Asked for, or an error when not in a terminal |
