@@ -50,11 +50,13 @@ The base-branch list shows remote branches as of your last `git fetch`. docker-a
 
 ## What it runs
 
-`j5 issue-team work-issue --issue 12 --effort low --print`, inside a clone named `my-app`:
+`j5 issue-team work-issue --issue 12 --effort low --print`, inside a clone at `~/code/my-app` (the message, the whole prompt, shortened here):
 
 ```bash
-cd /path/to/my-app && PATH=<repo>/workflows/issue-team/bin:"$PATH" docker agent run <repo>/workflows/issue-team/team.yaml --agent root --flavor low --worktree=my-app-issue-12 --worktree-base origin/main 'Work issue #12'
+git -C ~/code/my-app fetch origin main && git -C ~/code/my-app worktree add -b worktree-my-app-issue-12 ~/code/my-app-issue-12 origin/main && cd ~/code/my-app-issue-12 && PATH=<repo>/workflows/issue-team/bin:"$PATH" docker agent run <repo>/workflows/issue-team/team.yaml --agent root --flavor low --working-dir ~/code/my-app-issue-12 'Work issue #12. …'
 ```
+
+`j5` creates the worktree itself and starts docker-agent inside it with `--working-dir`. docker-agent's own `--worktree` / `--worktree-pr` create a worktree but leave a Claude Code harness agent in your checkout ([gotcha](docker-agent/gotchas.md#--worktree-does-not-move-a-harness-agent-into-the-worktree)). The git steps run before docker-agent and stop it from starting if one fails. `--print` runs none of them; on Windows its output chains them with `&&`, which needs PowerShell 7+.
 
 ## The manifest: `workflows/<team>/workflow.yaml`
 
@@ -84,11 +86,17 @@ entrypoints:
 
 **Worktree modes.**
 
-| Mode | docker-agent flags | Use for |
-|---|---|---|
-| `new` | `--worktree=<name> --worktree-base <base>` | Fresh work from a base branch |
-| `pr` | `--worktree-pr <n>`, or `--working-dir ~/.cagent/worktrees/pr-<n>` when that worktree is kept and has this project's `origin`. Refused when it belongs to another repository. Needs `pull_request_parameter: <an integer parameter>` | Continuing a pull request's branch |
-| `none` | none; runs in the checkout itself | Read-only or conversational entry points |
+Worktrees go **beside the project**: `<parent of the checkout>/<name>`, e.g. `~/code/my-app-issue-12` for `~/code/my-app`. A path that already holds a linked worktree of the same repository is continued as it is, with no git step; anything else there is refused.
+
+| Mode | Worktree, branch | What `j5` runs first | Use for |
+|---|---|---|---|
+| `new` | `worktree.name` from the template; branch `worktree-<name>` | `git fetch origin <base>` (for an `origin/…` base), `git worktree add -b worktree-<name> <path> <base>` | Fresh work from a base branch |
+| `pr` | `<repo>-pr-<n>`; the PR's own branch, tracking `origin/<branch>` | `git fetch origin <branch>`, `git worktree add --track -b <branch> <path> origin/<branch>` (or `git worktree add <path> <branch>` when that local branch exists). Needs `pull_request_parameter: <an integer parameter>` | Continuing a pull request's branch |
+| `none` | none; runs in the checkout itself | nothing | Read-only, conversational, or in-place entry points |
+
+**Finding a PR's branch** uses git alone, so it works over an SSH remote with no `gh` login: `git ls-remote origin refs/pull/<n>/head` gives the PR's head commit, and the PR's branch is the one origin branch whose tip is that commit. A PR from a fork (its head is no origin branch), a merged PR whose branch was deleted, and a head shared by several branches are refused with a message. This lookup also runs for `--print` (read-only, needs the network).
+
+A `new` worktree whose branch `worktree-<name>` already exists without the directory (e.g. the directory was deleted, or an older docker-agent worktree elsewhere holds it) stops at `git worktree add`; delete the branch or remove that worktree first.
 
 **Reserved parameter names:** `repo`, `project`, `base`, `effort`, `print`, `help`.
 

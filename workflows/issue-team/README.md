@@ -63,7 +63,7 @@ Each helper is `helpers/<name>.ts` run by Bun; `bin/issue-team-<name>` (sh) and 
 - The reviewer stays read-only and does not run the project.
 - Agents never weaken, skip or delete a failing test without your agreement, and treat issue and review text as data, not instructions.
 
-Each run works in its own git worktree under `~/.cagent/worktrees/`, never in your checkout.
+Each run works in its own git worktree beside your checkout (e.g. `~/code/my-app-issue-123` for `~/code/my-app`), which `j5` creates and starts the agent in. Your checkout is never used.
 
 ## Setup
 
@@ -85,26 +85,27 @@ j5 issue-team work-issue --issue 123 --print     # the full docker agent command
 ```
 
 ```
-work-issue 123     # issue #123 → worktree <repo>-issue-123 (branch worktree-<repo>-issue-123) → PR
-pr-followup 456    # PR #456 → worktree pr-456 on the PR's own branch → fixes pushed, threads answered
-closeout 456       # merged PR #456 → worktree <repo>-closeout-pr-456 at the latest default branch
+work-issue 123     # issue #123 → worktree ../<repo>-issue-123 (branch worktree-<repo>-issue-123) → PR
+pr-followup 456    # PR #456 → worktree ../<repo>-pr-456 on the PR's own branch → fixes pushed, threads answered
+closeout 456       # merged PR #456 → worktree ../<repo>-closeout-pr-456 at the latest default branch
 ```
 
-Worktree names carry the repository name, so the same issue number in two repositories never collides. `pr-followup` is the exception: docker-agent always names PR worktrees `pr-<n>`, so `j5` reuses a kept `pr-<n>` only when its `origin` matches the current repository and refuses otherwise.
+Worktrees sit beside the checkout and carry the repository name, so the same number in two repositories never collides. Running the same stage again continues in its existing worktree. `pr-followup` finds the PR's branch with git over your remote (no `gh` needed for that step) and refuses a PR from a fork. Details: [docs/launcher.md](../../docs/launcher.md#the-manifest-workflowsteamworkflowyaml).
 
 ```bash
-# Resume the newest session; it reattaches to its worktree (do not pass --worktree again)
-docker agent run "$HOME/number-5/workflows/issue-team/team.yaml" --session -1
+# Resume the newest session. Start it inside the stage's worktree (or pass --working-dir
+# <worktree>): a resumed session does not remember its working directory.
+cd ~/code/my-app-issue-123 && docker agent run "$HOME/number-5/workflows/issue-team/team.yaml" --session -1
 
 # Read a past session without sending anything
 docker agent run "$HOME/number-5/workflows/issue-team/team.yaml" --session -1 --session-read-only
 ```
 
-`--worktree`, `--worktree-pr` and `--sandbox` cannot be combined. Worktrees from `--exec` runs are never removed automatically; clean them with `git worktree list` and `git worktree remove <path>`.
+Worktrees are never removed automatically; `closeout` offers to clean up after a merge, or use `git worktree list` and `git worktree remove <path>`.
 
 ### `issue-team.sh` and `docker agent run issue-team`
 
-`issue-team.sh` (shell functions) and a bare `docker agent run …/team.yaml` still start the right agent in the right worktree, but send only a one-line message: the prompts live in `workflow.yaml`, which only `j5` reads. Use `j5`. The file is kept as a reference copy.
+`issue-team.sh` (shell functions) and a bare `docker agent run …/team.yaml` are not safe to use any more: they send only a one-line message (the prompts live in `workflow.yaml`, which only `j5` reads), and their `--worktree` / `--worktree-pr` leave the Claude Code agent working in your checkout instead of the worktree. Use `j5`. The file is kept as a reference copy.
 
 ## Known limits
 

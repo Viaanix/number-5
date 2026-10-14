@@ -20,7 +20,7 @@ workflows/my-team/
 2. **Write each entry agent's prompt as its entry point's `message`** in `workflow.yaml`: the procedure, what every sub-agent task carries, the output format, and the rules (what it must never do). `{param}` fills a parameter; write `{{` and `}}` for literal braces.
 3. **Move anything deterministic into a helper** that the prompt tells the agent to run by bare name (the helper reads its arguments from the command line or the environment). Write it as `helpers/<verb>.ts`, using `runHelper` and `readToolArgument` from `launcher/src/team-helper.ts`; logic another team already has (the change diff, the test pre-screen) is a function in `launcher/src/` to call, not code to copy. Copy a launcher pair from `workflows/issue-team/bin/` as `bin/<team>-<verb>` and `bin/<team>-<verb>.cmd`. The `<team>-` prefix keeps two teams' helpers from shadowing each other on `PATH`. Never name a tool argument `path`: arguments reach the helper as environment variables, and on Windows `path` is `PATH`. See [patterns](docker-agent/patterns.md#helpers-that-run-on-every-os).
 4. **Define effort levels** as `flavors:` (for harness agents, `harness.effort`) if the team should have any. Keep each flavor to the keys it changes.
-5. **Write `workflow.yaml`** ([schema](launcher.md#the-manifest-teamworkflowyaml)) with one entry point per way of starting the team.
+5. **Write `workflow.yaml`** ([schema](launcher.md#the-manifest-workflowsteamworkflowyaml)) with one entry point per way of starting the team.
 6. **Check it:**
    ```bash
    bun run validate:teams                       # manifest rules, agents exist, configs parse, flavors change something, dry runs

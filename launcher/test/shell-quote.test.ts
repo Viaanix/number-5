@@ -122,6 +122,7 @@ describe("quoteForPowerShell", () => {
 
 describe("renderPlanAsShellCommand", () => {
   const plan = {
+    preparationSteps: [],
     commandWords: ["docker", "agent", "run", "/teams/x/team.yaml", "Work issue #12"],
     workingDirectory: "/home/me/my app",
     pathEnvironment: "/teams/x/bin:/usr/bin",
@@ -141,6 +142,7 @@ describe("renderPlanAsShellCommand", () => {
 
   test("powershell: Set-Location, $env:Path prepended with ;, and & before the command", () => {
     const windowsPlan = {
+      preparationSteps: [],
       commandWords: ["docker", "agent", "run", "C:\\teams\\x\\team.yaml", "Work issue #12"],
       workingDirectory: "C:\\Users\\me\\my app",
       pathEnvironment: "C:\\teams\\x\\bin;C:\\Windows",
@@ -149,6 +151,86 @@ describe("renderPlanAsShellCommand", () => {
       `Set-Location -LiteralPath 'C:\\Users\\me\\my app'; $env:Path = 'C:\\teams\\x\\bin;' + $env:Path; & docker agent run C:\\teams\\x\\team.yaml 'Work issue #12'`,
     );
   });
+});
+
+describe("renderPlanAsShellCommand — worktree steps", () => {
+  const planWithSteps = {
+    preparationSteps: [
+      ["git", "-C", "/code/my app", "fetch", "origin", "main"],
+      [
+        "git",
+        "-C",
+        "/code/my app",
+        "worktree",
+        "add",
+        "-b",
+        "worktree-x",
+        "/code/x",
+        "origin/main",
+      ],
+    ],
+    commandWords: [
+      "docker",
+      "agent",
+      "run",
+      "/teams/x/team.yaml",
+      "--working-dir",
+      "/code/x",
+      "Go",
+    ],
+    workingDirectory: "/code/x",
+    pathEnvironment: "/teams/x/bin:/usr/bin",
+  };
+
+  test("posix: the git steps come first, each joined with &&", () => {
+    expect(renderPlanAsShellCommand(planWithSteps, ["/teams/x/bin"], "posix")).toBe(
+      `git -C '/code/my app' fetch origin main && git -C '/code/my app' worktree add -b worktree-x /code/x origin/main && cd /code/x && PATH=/teams/x/bin:"$PATH" docker agent run /teams/x/team.yaml --working-dir /code/x Go`,
+    );
+  });
+
+  test("powershell: the launch is one script block, so && covers all of it", () => {
+    expect(renderPlanAsShellCommand(planWithSteps, ["/teams/x/bin"], "powershell")).toBe(
+      `& git -C '/code/my app' fetch origin main && & git -C '/code/my app' worktree add -b worktree-x /code/x origin/main && & { Set-Location -LiteralPath /code/x; $env:Path = '/teams/x/bin;' + $env:Path; & docker agent run /teams/x/team.yaml --working-dir /code/x Go }`,
+    );
+  });
+
+  // A pasted --print line whose git step fails must not start the agent: in the wrong
+  // directory it would work in the user's checkout. An invalid git option stands in for the failing
+  // step, `echo` for docker.
+  const failingPlan = {
+    preparationSteps: [["git", "--no-such-option"]],
+    commandWords: ["echo", "LAUNCHED"],
+    workingDirectory: ".",
+    pathEnvironment: "",
+  };
+
+  test.skipIf(process.platform === "win32")(
+    "bash stops at a failed step and never launches",
+    () => {
+      const completedProcess = Bun.spawnSync([
+        "bash",
+        "-c",
+        renderPlanAsShellCommand(failingPlan, [], "posix"),
+      ]);
+      expect(completedProcess.exitCode).not.toBe(0);
+      expect(completedProcess.stdout.toString()).not.toContain("LAUNCHED");
+    },
+  );
+
+  test.skipIf(powerShellPath === null && !powerShellRequired)(
+    "pwsh stops at a failed step and never launches",
+    () => {
+      const completedProcess = Bun.spawnSync([
+        "pwsh",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        renderPlanAsShellCommand(failingPlan, [], "powershell"),
+      ]);
+      expect(completedProcess.stdout.toString()).not.toContain("LAUNCHED");
+    },
+    POWERSHELL_TEST_TIMEOUT_MILLISECONDS,
+  );
 });
 
 describe("shellDialectForPlatform", () => {

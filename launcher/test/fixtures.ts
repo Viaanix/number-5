@@ -83,6 +83,26 @@ export function createFixtureProject(repositoryName: string): FixtureProject {
 }
 
 /**
+ * Pushes a new branch with one commit to the fixture's origin and publishes that commit
+ * as `refs/pull/<number>/head`, the way GitHub exposes a pull request's head. The
+ * project's own checkout stays on its branch. Returns the PR's branch name.
+ */
+export function addPullRequestToOrigin(projectRoot: string, pullRequestNumber: number): string {
+  const branchName = `feature/pr-${pullRequestNumber}`;
+  runGit(projectRoot, [
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    "-m",
+    `work for PR ${pullRequestNumber}`,
+  ]);
+  runGit(projectRoot, ["push", "--quiet", "origin", `HEAD:refs/heads/${branchName}`]);
+  runGit(projectRoot, ["push", "--quiet", "origin", `HEAD:refs/pull/${pullRequestNumber}/head`]);
+  runGit(projectRoot, ["reset", "--quiet", "--hard", "HEAD~1"]);
+  return branchName;
+}
+
+/**
  * Writes a team directory: workflow.yaml and team.yaml with the given contents.
  * Returns the path of workflow.yaml.
  */

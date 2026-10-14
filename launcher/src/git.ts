@@ -3,14 +3,10 @@
 // lookup at a time, so there is nothing to gain from async.
 
 import { existsSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
-/**
- * Where docker-agent v1.145.0 creates `--worktree` and `--worktree-pr` checkouts
- * (its default `--data-dir` is ~/.cagent).
- */
-export const DOCKER_AGENT_WORKTREES_DIRECTORY = join(homedir(), ".cagent", "worktrees");
+/** The remote every lookup and fetch uses, as everywhere else in the launcher. */
+export const ORIGIN_REMOTE_NAME = "origin";
 
 const SUCCESS_EXIT_CODE = 0;
 
@@ -107,34 +103,112 @@ export function refExists(repositoryRoot: string, ref: string): boolean {
 }
 
 /**
- * What already exists at docker-agent's worktree path for a pull request.
- * - absent: nothing there; docker-agent can create it with --worktree-pr.
- * - reusable: a kept worktree of this same repository; continue in it.
- * - foreign: a kept worktree of a different repository with the same PR number.
+ * What already exists at the path j5 wants a worktree at.
+ * - absent: nothing there; j5 creates the worktree.
+ * - reusable: a linked worktree of this same repository, rooted at that path; continue in it.
+ * - foreign: anything else (another repository's worktree, a plain directory, a file).
  */
-export type PullRequestWorktreeState =
-  | { kind: "absent" }
-  | { kind: "reusable"; path: string }
-  | { kind: "foreign"; path: string };
+export type WorktreeState = { kind: "absent" } | { kind: "reusable" } | { kind: "foreign" };
+
+function readAbsoluteGitPath(directory: string, gitOption: string): string | undefined {
+  const result = runCommand(["git", "rev-parse", "--path-format=absolute", gitOption], directory);
+  if (result.exitCode !== SUCCESS_EXIT_CODE) {
+    return undefined;
+  }
+  return realpathSync.native(resolve(result.standardOutput));
+}
 
 /**
- * Inspects docker-agent's worktree path for a PR number.
- * docker-agent names PR worktrees `pr-<number>` without the repository name, so the
- * same number in two repositories collides; the origin URL tells them apart.
+ * Inspects the path j5 wants a worktree at. Reusable means: a linked worktree
+ * (not the main checkout) whose root is exactly that path and whose repository
+ * is the project's, so a resumed run continues on the same branch.
  */
-export function inspectPullRequestWorktree(
-  repositoryRoot: string,
-  pullRequestNumber: number,
-  worktreesDirectory: string = DOCKER_AGENT_WORKTREES_DIRECTORY,
-): PullRequestWorktreeState {
-  const worktreePath = join(worktreesDirectory, `pr-${pullRequestNumber}`);
+export function inspectWorktreePath(repositoryRoot: string, worktreePath: string): WorktreeState {
   if (!existsSync(worktreePath)) {
     return { kind: "absent" };
   }
-  const worktreeOrigin = readOriginUrl(worktreePath);
-  const projectOrigin = readOriginUrl(repositoryRoot);
-  if (worktreeOrigin !== undefined && worktreeOrigin === projectOrigin) {
-    return { kind: "reusable", path: worktreePath };
+  const worktreeToplevel = readAbsoluteGitPath(worktreePath, "--show-toplevel");
+  const worktreeCommonDirectory = readAbsoluteGitPath(worktreePath, "--git-common-dir");
+  const worktreeGitDirectory = readAbsoluteGitPath(worktreePath, "--git-dir");
+  const projectCommonDirectory = readAbsoluteGitPath(repositoryRoot, "--git-common-dir");
+  const isLinkedWorktreeOfProject =
+    worktreeToplevel === realpathSync.native(worktreePath) &&
+    worktreeCommonDirectory !== undefined &&
+    worktreeCommonDirectory === projectCommonDirectory &&
+    worktreeGitDirectory !== worktreeCommonDirectory;
+  return isLinkedWorktreeOfProject ? { kind: "reusable" } : { kind: "foreign" };
+}
+
+/** True when the repository has a local branch with this name. */
+export function localBranchExists(repositoryRoot: string, branchName: string): boolean {
+  const result = runCommand(
+    ["git", "show-ref", "--verify", "--quiet", `refs/heads/${branchName}`],
+    repositoryRoot,
+  );
+  return result.exitCode === SUCCESS_EXIT_CODE;
+}
+
+// One `<sha>\t<ref>` line of `git ls-remote` output.
+const LS_REMOTE_LINE_PATTERN = /^([0-9a-f]+)\t(\S+)$/;
+const BRANCH_REF_PREFIX = "refs/heads/";
+
+function listRemoteRefs(
+  repositoryRoot: string,
+  options: string[],
+  refPatterns: string[],
+): Array<{ sha: string; ref: string }> {
+  const result = runCommand(
+    // Options go before the remote: anything after it is read as a ref pattern.
+    ["git", "ls-remote", ...options, ORIGIN_REMOTE_NAME, ...refPatterns],
+    repositoryRoot,
+  );
+  if (result.exitCode !== SUCCESS_EXIT_CODE) {
+    throw new Error(
+      `git ls-remote ${ORIGIN_REMOTE_NAME} failed in ${repositoryRoot}: ${result.standardError}`,
+    );
   }
-  return { kind: "foreign", path: worktreePath };
+  const refs: Array<{ sha: string; ref: string }> = [];
+  for (const line of result.standardOutput.split("\n")) {
+    const match = LS_REMOTE_LINE_PATTERN.exec(line);
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      refs.push({ sha: match[1], ref: match[2] });
+    }
+  }
+  return refs;
+}
+
+/**
+ * Finds the branch in origin that a pull request is built from, using git alone:
+ * GitHub publishes each PR's head commit as refs/pull/<n>/head, and the PR's branch
+ * is the origin branch whose tip is that commit. Git over SSH uses the same key as
+ * every other fetch, so this needs no `gh` login or token.
+ * @throws Error when origin has no such PR, or its head is not exactly one origin
+ *   branch (a PR from a fork, or two branches at the same commit).
+ */
+export function resolvePullRequestBranch(
+  repositoryRoot: string,
+  pullRequestNumber: number,
+): string {
+  const pullRequestRef = `refs/pull/${pullRequestNumber}/head`;
+  const [pullRequestHead] = listRemoteRefs(repositoryRoot, [], [pullRequestRef]);
+  if (pullRequestHead === undefined) {
+    throw new Error(
+      `${ORIGIN_REMOTE_NAME} has no pull request #${pullRequestNumber} (no ${pullRequestRef})`,
+    );
+  }
+  const branchNames = listRemoteRefs(repositoryRoot, ["--heads"], [])
+    .filter((remoteRef) => remoteRef.sha === pullRequestHead.sha)
+    .map((remoteRef) => remoteRef.ref.slice(BRANCH_REF_PREFIX.length));
+  const [branchName, ...otherBranchNames] = branchNames;
+  if (branchName === undefined) {
+    throw new Error(
+      `pull request #${pullRequestNumber}'s head ${pullRequestHead.sha.slice(0, 7)} is not the tip of any branch in ${ORIGIN_REMOTE_NAME}: a PR from a fork, or its branch moved since; j5 can only follow up on a branch of this repository`,
+    );
+  }
+  if (otherBranchNames.length > 0) {
+    throw new Error(
+      `pull request #${pullRequestNumber}'s head is the tip of several ${ORIGIN_REMOTE_NAME} branches (${branchNames.join(", ")}); cannot tell which one the PR is built from`,
+    );
+  }
+  return branchName;
 }

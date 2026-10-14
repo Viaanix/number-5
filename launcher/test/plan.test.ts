@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { delimiter } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import type { WorkflowManifest } from "../src/manifest.ts";
 import { buildLaunchPlan, type LaunchRequest } from "../src/plan.ts";
@@ -8,6 +8,9 @@ const TEAM_CONFIG_PATH = "/teams/sample/team.yaml";
 const TEAM_BIN_DIRECTORY = "/teams/sample/bin";
 const PROJECT_ROOT = "/code/my-app";
 const INHERITED_PATH = "/usr/local/bin:/usr/bin";
+// Worktrees go beside the project. join() so the expectations hold on Windows too.
+const NEW_WORKTREE_PATH = join(dirname(PROJECT_ROOT), "my-app-issue-12");
+const PULL_REQUEST_WORKTREE_PATH = join(dirname(PROJECT_ROOT), "my-app-pr-456");
 
 const SAMPLE_MANIFEST: WorkflowManifest = {
   name: "sample-team",
@@ -51,7 +54,7 @@ function buildRequest(overrides: Partial<LaunchRequest>): LaunchRequest {
     parameterValues: { issue: "12" },
     effort: undefined,
     baseRef: "origin/main",
-    pullRequestWorktree: undefined,
+    worktree: { state: { kind: "absent" }, pullRequestBranch: undefined },
     passthroughArguments: [],
     inheritedPath: INHERITED_PATH,
     ...overrides,
@@ -59,8 +62,24 @@ function buildRequest(overrides: Partial<LaunchRequest>): LaunchRequest {
 }
 
 describe("buildLaunchPlan — new worktree", () => {
-  test("names the worktree from the template, branches from the base ref, runs in the project", () => {
+  // Catches docker-agent's --worktree coming back: it leaves a Claude Code harness
+  // agent in the user's checkout. The agent must start inside the new worktree.
+  test("creates the worktree beside the project from the fetched base, then runs docker-agent inside it", () => {
     expect(buildLaunchPlan(buildRequest({}))).toEqual({
+      preparationSteps: [
+        ["git", "-C", PROJECT_ROOT, "fetch", "origin", "main"],
+        [
+          "git",
+          "-C",
+          PROJECT_ROOT,
+          "worktree",
+          "add",
+          "-b",
+          "worktree-my-app-issue-12",
+          NEW_WORKTREE_PATH,
+          "origin/main",
+        ],
+      ],
       commandWords: [
         "docker",
         "agent",
@@ -68,14 +87,48 @@ describe("buildLaunchPlan — new worktree", () => {
         TEAM_CONFIG_PATH,
         "--agent",
         "root",
-        "--worktree=my-app-issue-12",
-        "--worktree-base",
-        "origin/main",
+        "--working-dir",
+        NEW_WORKTREE_PATH,
         "Work issue #12",
       ],
-      workingDirectory: PROJECT_ROOT,
+      workingDirectory: NEW_WORKTREE_PATH,
       pathEnvironment: `${TEAM_BIN_DIRECTORY}${delimiter}${INHERITED_PATH}`,
     });
+  });
+
+  test("fetches only a remote-tracking base; a local ref or SHA is used as it is", () => {
+    const plan = buildLaunchPlan(buildRequest({ baseRef: "release-2" }));
+    expect(plan.preparationSteps).toEqual([
+      [
+        "git",
+        "-C",
+        PROJECT_ROOT,
+        "worktree",
+        "add",
+        "-b",
+        "worktree-my-app-issue-12",
+        NEW_WORKTREE_PATH,
+        "release-2",
+      ],
+    ]);
+  });
+
+  // Catches a resumed run resetting or re-branching work already in the worktree.
+  test("continues in an existing worktree of the project without any git step", () => {
+    const plan = buildLaunchPlan(
+      buildRequest({ worktree: { state: { kind: "reusable" }, pullRequestBranch: undefined } }),
+    );
+    expect(plan.preparationSteps).toEqual([]);
+    expect(plan.workingDirectory).toBe(NEW_WORKTREE_PATH);
+    expect(plan.commandWords).toContain(NEW_WORKTREE_PATH);
+  });
+
+  test("refuses a path that holds something other than a worktree of the project", () => {
+    expect(() =>
+      buildLaunchPlan(
+        buildRequest({ worktree: { state: { kind: "foreign" }, pullRequestBranch: undefined } }),
+      ),
+    ).toThrow(`${NEW_WORKTREE_PATH} exists and is not a worktree of ${PROJECT_ROOT}`);
   });
 
   test("passes the effort as --flavor and passthrough flags before the message", () => {
@@ -87,9 +140,8 @@ describe("buildLaunchPlan — new worktree", () => {
       "root",
       "--flavor",
       "low",
-      "--worktree=my-app-issue-12",
-      "--worktree-base",
-      "origin/main",
+      "--working-dir",
+      NEW_WORKTREE_PATH,
       "--safety",
       "balanced",
       "Work issue #12",
@@ -102,6 +154,12 @@ describe("buildLaunchPlan — new worktree", () => {
     );
   });
 
+  test("refuses to build without the worktree's state", () => {
+    expect(() => buildLaunchPlan(buildRequest({ worktree: undefined }))).toThrow(
+      `entry point 'work-issue' needs the state of ${NEW_WORKTREE_PATH}`,
+    );
+  });
+
   test("refuses a worktree name that would not be one safe path segment", () => {
     expect(() => buildLaunchPlan(buildRequest({ repositoryName: "../escape" }))).toThrow(
       "worktree name '../escape-issue-12' must match",
@@ -111,17 +169,61 @@ describe("buildLaunchPlan — new worktree", () => {
 
 describe("buildLaunchPlan — pull request worktree", () => {
   const pullRequestRequest = { entryPointName: "pr-followup", parameterValues: { pr: "456" } };
+  const pullRequestBranch = { name: "feature/login", existsLocally: false };
 
-  test("asks docker-agent to create the PR worktree when none exists", () => {
+  // Catches a PR worktree on a detached HEAD or an untracked branch: followup's
+  // `git pull --ff-only` and `git push` must update the PR's own branch.
+  test("creates a worktree on a new local branch that tracks the PR's branch", () => {
     const plan = buildLaunchPlan(
-      buildRequest({ ...pullRequestRequest, pullRequestWorktree: { kind: "absent" } }),
+      buildRequest({
+        ...pullRequestRequest,
+        worktree: { state: { kind: "absent" }, pullRequestBranch },
+      }),
     );
+    expect(plan.preparationSteps).toEqual([
+      ["git", "-C", PROJECT_ROOT, "fetch", "origin", "feature/login"],
+      [
+        "git",
+        "-C",
+        PROJECT_ROOT,
+        "worktree",
+        "add",
+        "--track",
+        "-b",
+        "feature/login",
+        PULL_REQUEST_WORKTREE_PATH,
+        "origin/feature/login",
+      ],
+    ]);
     expect(plan.commandWords.slice(4)).toEqual([
       "--agent",
       "followup",
-      "--worktree-pr",
-      "456",
+      "--working-dir",
+      PULL_REQUEST_WORKTREE_PATH,
       "Follow up on PR #456 in my-app",
+    ]);
+    expect(plan.workingDirectory).toBe(PULL_REQUEST_WORKTREE_PATH);
+  });
+
+  // Catches `-b` on a branch that already exists locally, which git refuses.
+  test("uses an existing local branch of the same name as it is", () => {
+    const plan = buildLaunchPlan(
+      buildRequest({
+        ...pullRequestRequest,
+        worktree: {
+          state: { kind: "absent" },
+          pullRequestBranch: { name: "feature/login", existsLocally: true },
+        },
+      }),
+    );
+    expect(plan.preparationSteps[1]).toEqual([
+      "git",
+      "-C",
+      PROJECT_ROOT,
+      "worktree",
+      "add",
+      PULL_REQUEST_WORKTREE_PATH,
+      "feature/login",
     ]);
   });
 
@@ -129,17 +231,11 @@ describe("buildLaunchPlan — pull request worktree", () => {
     const plan = buildLaunchPlan(
       buildRequest({
         ...pullRequestRequest,
-        pullRequestWorktree: { kind: "reusable", path: "/home/me/.cagent/worktrees/pr-456" },
+        worktree: { state: { kind: "reusable" }, pullRequestBranch: undefined },
       }),
     );
-    expect(plan.commandWords.slice(4)).toEqual([
-      "--agent",
-      "followup",
-      "--working-dir",
-      "/home/me/.cagent/worktrees/pr-456",
-      "Follow up on PR #456 in my-app",
-    ]);
-    expect(plan.commandWords).not.toContain("--worktree-pr");
+    expect(plan.preparationSteps).toEqual([]);
+    expect(plan.workingDirectory).toBe(PULL_REQUEST_WORKTREE_PATH);
   });
 
   test("refuses when the PR worktree path belongs to another repository", () => {
@@ -147,15 +243,15 @@ describe("buildLaunchPlan — pull request worktree", () => {
       buildLaunchPlan(
         buildRequest({
           ...pullRequestRequest,
-          pullRequestWorktree: { kind: "foreign", path: "/home/me/.cagent/worktrees/pr-456" },
+          worktree: { state: { kind: "foreign" }, pullRequestBranch: undefined },
         }),
       ),
-    ).toThrow("/home/me/.cagent/worktrees/pr-456 belongs to another repository");
+    ).toThrow(`${PULL_REQUEST_WORKTREE_PATH} exists and is not a worktree of ${PROJECT_ROOT}`);
   });
 
-  test("refuses to build without the PR worktree state", () => {
+  test("refuses to create the worktree without the PR's branch", () => {
     expect(() => buildLaunchPlan(buildRequest(pullRequestRequest))).toThrow(
-      "entry point 'pr-followup' needs a PR number and the PR worktree state",
+      "entry point 'pr-followup' needs the PR's branch to create its worktree",
     );
   });
 });
@@ -166,6 +262,8 @@ describe("buildLaunchPlan — no worktree", () => {
       buildRequest({ entryPointName: "chat", parameterValues: { topic: "flavors" } }),
     );
     expect(plan.commandWords.slice(4)).toEqual(["--agent", "root", "Talk about flavors"]);
+    expect(plan.preparationSteps).toEqual([]);
+    expect(plan.workingDirectory).toBe(PROJECT_ROOT);
   });
 });
 

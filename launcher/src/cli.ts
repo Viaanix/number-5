@@ -12,16 +12,22 @@ import { basename, resolve } from "node:path";
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
 import { readPathValue, withPathValue } from "./environment.ts";
 import {
-  inspectPullRequestWorktree,
+  inspectWorktreePath,
   listRemoteBranches,
-  type PullRequestWorktreeState,
+  localBranchExists,
   refExists,
   resolveDefaultBranchRef,
   resolveGitToplevel,
+  resolvePullRequestBranch,
 } from "./git.ts";
 import type { EntryPointDefinition, WorkflowManifest } from "./manifest.ts";
 import { describeInvalidEffort, describeInvalidParameterValue } from "./parameters.ts";
-import { buildLaunchPlan, type LaunchPlan } from "./plan.ts";
+import {
+  buildLaunchPlan,
+  type LaunchPlan,
+  resolveWorktreeLocation,
+  type WorktreeFacts,
+} from "./plan.ts";
 import {
   askForText,
   askToChoose,
@@ -315,6 +321,21 @@ async function runPlan(plan: LaunchPlan): Promise<number> {
       `'${commandName}' was not found on PATH; is Docker with the docker agent plugin installed?`,
     );
   }
+  // Worktree steps run after the docker check, so a missing docker leaves no worktree
+  // behind, and stop at the first failure, so docker-agent never starts in a
+  // directory that was not created. Git's own output stays visible.
+  for (const stepWords of plan.preparationSteps) {
+    const completedStep = Bun.spawnSync(stepWords, {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    if (completedStep.exitCode !== EXIT_CODE_SUCCESS) {
+      throw new Error(
+        `${stepWords.join(" ")} failed (exit ${completedStep.exitCode}); docker-agent was not started`,
+      );
+    }
+  }
   let childProcess: Bun.Subprocess;
   try {
     childProcess = Bun.spawn([executablePath, ...commandArguments], {
@@ -399,21 +420,41 @@ async function launch(
     interaction,
   );
 
-  let pullRequestWorktree: PullRequestWorktreeState | undefined;
-  if (entryPoint.worktree.mode === "pr") {
-    const pullRequestNumber = Number(parameterValues[entryPoint.worktree.pull_request_parameter]);
-    pullRequestWorktree = inspectPullRequestWorktree(projectRoot, pullRequestNumber);
+  const repositoryName = basename(projectRoot);
+  const worktreeLocation = resolveWorktreeLocation(
+    team,
+    entryPointName,
+    projectRoot,
+    repositoryName,
+    parameterValues,
+  );
+  let worktree: WorktreeFacts | undefined;
+  if (worktreeLocation !== undefined) {
+    const state = inspectWorktreePath(projectRoot, worktreeLocation.path);
+    let pullRequestBranch: WorktreeFacts["pullRequestBranch"];
+    if (entryPoint.worktree.mode === "pr" && state.kind === "absent") {
+      // Read-only, over git's own transport (SSH for an SSH origin): no gh login needed.
+      const branchName = resolvePullRequestBranch(
+        projectRoot,
+        Number(parameterValues[entryPoint.worktree.pull_request_parameter]),
+      );
+      pullRequestBranch = {
+        name: branchName,
+        existsLocally: localBranchExists(projectRoot, branchName),
+      };
+    }
+    worktree = { state, pullRequestBranch };
   }
 
   const plan = buildLaunchPlan({
     manifest: team,
     entryPointName,
     projectRoot,
-    repositoryName: basename(projectRoot),
+    repositoryName,
     parameterValues,
     effort,
     baseRef,
-    pullRequestWorktree,
+    worktree,
     passthroughArguments: parsedArguments.passthroughArguments,
     inheritedPath: readPathValue(process.env),
   });

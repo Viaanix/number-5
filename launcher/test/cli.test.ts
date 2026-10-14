@@ -3,22 +3,29 @@
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, realpathSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "../src/arguments.ts";
 import { formatUsage } from "../src/cli.ts";
 import { readPathValue, withPathValue } from "../src/environment.ts";
 import { loadManifest } from "../src/manifest.ts";
-import { quoteForPosixShell, quoteForPowerShell } from "../src/shell-quote.ts";
+import {
+  quoteForPosixShell,
+  quoteForPowerShell,
+  renderPlanAsShellCommand,
+  shellDialectForPlatform,
+} from "../src/shell-quote.ts";
 import { fillTemplate } from "../src/template.ts";
 import {
+  addPullRequestToOrigin,
   createFixtureProject,
   createTemporaryDirectory,
   FIXTURE_DEFAULT_BRANCH,
   FIXTURE_FEATURE_BRANCH,
   removeTemporaryDirectories,
+  runGit,
   writeFakeExecutable,
 } from "./fixtures.ts";
 
@@ -46,9 +53,6 @@ function expectedFirstMessage(
 }
 const EXIT_CODE_USAGE = 2;
 
-// A PR number no real ~/.cagent/worktrees/pr-<n> will have, so the state is "absent".
-const UNUSED_PULL_REQUEST_NUMBER = "987654321";
-
 const RUNNING_ON_WINDOWS = process.platform === "win32";
 
 // The exit code fixtures/fake-docker.ts ends with; the launcher must pass it through.
@@ -60,13 +64,23 @@ function canonicalPath(path: string): string {
   return realpathSync.native(path);
 }
 
-// The beginning of the printed command, up to and including the PATH prefix, in the
-// dialect j5 uses on this platform.
-function expectedCommandPrefix(projectRoot: string): string {
-  if (RUNNING_ON_WINDOWS) {
-    return `Set-Location -LiteralPath ${quoteForPowerShell(canonicalPath(projectRoot))}; $env:Path = ${quoteForPowerShell(`${ISSUE_TEAM_BIN};`)} + $env:Path; & `;
-  }
-  return `cd ${quoteForPosixShell(canonicalPath(projectRoot))} && PATH=${quoteForPosixShell(ISSUE_TEAM_BIN)}:"$PATH" `;
+// Where j5 puts a worktree: beside the project, under the given name.
+function expectedWorktreePath(projectRoot: string, worktreeName: string): string {
+  return join(dirname(canonicalPath(projectRoot)), worktreeName);
+}
+
+// The --print line for an expected plan, in this platform's dialect. The renderer has
+// its own tests; these pin which steps and words the launcher puts in the plan.
+function expectedPrintedCommand(
+  preparationSteps: string[][],
+  workingDirectory: string,
+  commandWords: string[],
+): string {
+  return renderPlanAsShellCommand(
+    { preparationSteps, commandWords, workingDirectory, pathEnvironment: "" },
+    [ISSUE_TEAM_BIN],
+    shellDialectForPlatform(process.platform),
+  );
 }
 
 const quoteForThisPlatform = RUNNING_ON_WINDOWS ? quoteForPowerShell : quoteForPosixShell;
@@ -93,19 +107,51 @@ function runCli(
 }
 
 describe("j5 --print", () => {
-  test("work-issue: worktree named after the repository, from the remote default branch", () => {
+  test("work-issue: fetches the base, adds a worktree beside the project, starts docker-agent inside it", () => {
     const { projectRoot } = createFixtureProject("print-app");
+    const root = canonicalPath(projectRoot);
+    const worktreePath = expectedWorktreePath(projectRoot, "print-app-issue-12");
     const result = runCli(["issue-team", "work-issue", "--issue", "12", "--print"], projectRoot);
     expect(result).toEqual({
       exitCode: 0,
-      standardOutput: `${expectedCommandPrefix(projectRoot)}docker agent run ${quoteForThisPlatform(ISSUE_TEAM_CONFIG)} --agent root --worktree=print-app-issue-12 --worktree-base origin/${FIXTURE_DEFAULT_BRANCH} ${quoteForThisPlatform(expectedFirstMessage("work-issue", { issue: "12" }))}`,
+      standardOutput: expectedPrintedCommand(
+        [
+          ["git", "-C", root, "fetch", "origin", FIXTURE_DEFAULT_BRANCH],
+          [
+            "git",
+            "-C",
+            root,
+            "worktree",
+            "add",
+            "-b",
+            "worktree-print-app-issue-12",
+            worktreePath,
+            `origin/${FIXTURE_DEFAULT_BRANCH}`,
+          ],
+        ],
+        worktreePath,
+        [
+          "docker",
+          "agent",
+          "run",
+          ISSUE_TEAM_CONFIG,
+          "--agent",
+          "root",
+          "--working-dir",
+          worktreePath,
+          expectedFirstMessage("work-issue", { issue: "12" }),
+        ],
+      ),
       standardError: "",
     });
+    // --print has no side effects: the worktree is only described.
+    expect(existsSync(worktreePath)).toBe(false);
   });
 
   test("--project, --base, --effort and passthrough flags all reach the command", () => {
     const { projectRoot } = createFixtureProject("flags-app");
     const elsewhere = createTemporaryDirectory();
+    const worktreePath = expectedWorktreePath(projectRoot, "flags-app-closeout-pr-7");
     const result = runCli(
       [
         "issue-team",
@@ -124,21 +170,63 @@ describe("j5 --print", () => {
       elsewhere,
     );
     expect(result.exitCode).toBe(0);
+    expect(result.standardOutput).toContain(
+      `fetch origin ${quoteForThisPlatform(FIXTURE_FEATURE_BRANCH)}`,
+    );
     expect(result.standardOutput).toEndWith(
-      `--agent closeout --flavor low --worktree=flags-app-closeout-pr-7 --worktree-base origin/${FIXTURE_FEATURE_BRANCH} --safety balanced ${quoteForThisPlatform(expectedFirstMessage("closeout", { pr: "7" }))}`,
+      `--agent closeout --flavor low --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage("closeout", { pr: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
     );
   });
 
-  test("pr-followup: lets docker-agent create the PR worktree when none is kept", () => {
+  // Catches a PR worktree that is not on the PR's own branch, found without gh: the
+  // fixture origin is a local bare repository with no GitHub behind it.
+  test("pr-followup: finds the PR's branch with git and adds a worktree tracking it", () => {
     const { projectRoot } = createFixtureProject("followup-app");
-    const result = runCli(
-      ["issue-team", "pr-followup", "--pr", UNUSED_PULL_REQUEST_NUMBER, "--print"],
-      projectRoot,
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.standardOutput).toContain(
-      `--agent followup --worktree-pr ${UNUSED_PULL_REQUEST_NUMBER} ${quoteForThisPlatform(expectedFirstMessage("pr-followup", { pr: UNUSED_PULL_REQUEST_NUMBER }))}`,
-    );
+    const branchName = addPullRequestToOrigin(projectRoot, 7);
+    const root = canonicalPath(projectRoot);
+    const worktreePath = expectedWorktreePath(projectRoot, "followup-app-pr-7");
+    const result = runCli(["issue-team", "pr-followup", "--pr", "7", "--print"], projectRoot);
+    expect(result).toEqual({
+      exitCode: 0,
+      standardOutput: expectedPrintedCommand(
+        [
+          ["git", "-C", root, "fetch", "origin", branchName],
+          [
+            "git",
+            "-C",
+            root,
+            "worktree",
+            "add",
+            "--track",
+            "-b",
+            branchName,
+            worktreePath,
+            `origin/${branchName}`,
+          ],
+        ],
+        worktreePath,
+        [
+          "docker",
+          "agent",
+          "run",
+          ISSUE_TEAM_CONFIG,
+          "--agent",
+          "followup",
+          "--working-dir",
+          worktreePath,
+          expectedFirstMessage("pr-followup", { pr: "7" }),
+        ],
+      ),
+      standardError: "",
+    });
+  });
+
+  test("pr-followup: reports a PR number origin does not have", () => {
+    const { projectRoot } = createFixtureProject("missing-pr-app");
+    const result = runCli(["issue-team", "pr-followup", "--pr", "8", "--print"], projectRoot);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.standardOutput).toBe("");
+    expect(result.standardError).toContain("origin has no pull request #8");
   });
 });
 
@@ -235,7 +323,10 @@ describe("j5 in a terminal", () => {
     );
     expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
-    expect(result.screenText).toContain(expectedCommandPrefix(projectRoot));
+    // The worktree is added from the repository root, not the subdirectory j5 started in.
+    expect(result.screenText).toContain(
+      `-C ${quoteForThisPlatform(canonicalPath(projectRoot))} worktree add -b worktree-terminal-app-issue-12`,
+    );
   });
 });
 
@@ -287,7 +378,7 @@ describe("j5 usage errors", () => {
 });
 
 describe("j5 launching", () => {
-  test("runs docker in the project with the team's bin first on PATH and returns its exit code", () => {
+  test("creates the worktree, runs docker inside it with the team's bin first on PATH, returns its exit code", () => {
     const { projectRoot } = createFixtureProject("launch-app");
     const fakeBinDirectory = createTemporaryDirectory();
     // An executable, not a .cmd: the first message is a multi-line prompt, which
@@ -298,17 +389,11 @@ describe("j5 launching", () => {
       join(import.meta.dir, "fixtures", "fake-docker.ts"),
     );
 
-    // Started from an unrelated directory, so the working-directory check proves the
-    // launcher moved into the project rather than inheriting the caller's directory.
-    const result = runCli(
-      ["issue-team", "work-issue", "--issue", "5", "--project", projectRoot],
-      createTemporaryDirectory(),
-      `${fakeBinDirectory}${delimiter}${readPathValue(process.env)}`,
-    );
-
-    expect(result.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
-    expect(JSON.parse(result.standardOutput)).toEqual({
-      workingDirectory: canonicalPath(projectRoot),
+    const worktreePath = expectedWorktreePath(projectRoot, "launch-app-issue-5");
+    const launchEnvironmentPath = `${fakeBinDirectory}${delimiter}${readPathValue(process.env)}`;
+    const launchArguments = ["issue-team", "work-issue", "--issue", "5", "--project", projectRoot];
+    const expectedDockerCall = {
+      workingDirectory: worktreePath,
       firstPathEntry: ISSUE_TEAM_BIN,
       arguments: [
         "agent",
@@ -316,14 +401,31 @@ describe("j5 launching", () => {
         ISSUE_TEAM_CONFIG,
         "--agent",
         "root",
-        "--worktree=launch-app-issue-5",
-        "--worktree-base",
-        `origin/${FIXTURE_DEFAULT_BRANCH}`,
+        "--working-dir",
+        worktreePath,
         expectedFirstMessage("work-issue", { issue: "5" }),
       ],
-    });
+    };
+
+    // Started from an unrelated directory, so the working-directory check proves the
+    // launcher moved into the worktree rather than inheriting the caller's directory.
+    const result = runCli(launchArguments, createTemporaryDirectory(), launchEnvironmentPath);
+
+    expect(result.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
+    // git's own output may precede the fake docker's JSON line.
+    expect(JSON.parse(result.standardOutput.trim().split("\n").at(-1) ?? "")).toEqual(
+      expectedDockerCall,
+    );
+    // The worktree is real, on its own branch; the user's checkout did not move.
+    expect(runGit(worktreePath, ["branch", "--show-current"])).toBe("worktree-launch-app-issue-5");
+    expect(runGit(projectRoot, ["branch", "--show-current"])).toBe(FIXTURE_DEFAULT_BRANCH);
     // Without prompts there is no confirmation, so the command is echoed as a receipt.
-    expect(result.standardError).toStartWith(`j5: ${expectedCommandPrefix(projectRoot)}`);
+    expect(result.standardError).toContain(`j5: `);
+
+    // Catches a rerun failing on `git worktree add` for a worktree that already exists.
+    const rerun = runCli(launchArguments, createTemporaryDirectory(), launchEnvironmentPath);
+    expect(rerun.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
+    expect(JSON.parse(rerun.standardOutput.trim())).toEqual(expectedDockerCall);
   });
 });
 
