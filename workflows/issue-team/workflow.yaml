@@ -42,11 +42,34 @@ entrypoints:
       3. **Build.** Send builder: the issue number, title and full text; the acceptance checklist; files and symbols you found relevant; the project commands; and these rules — follow the repository's conventions; keep the change scoped to the issue; do not commit, push or open PRs; run the build and the tests for the touched area; report changed files and command results.
       4. **Commit locally** what builder produced, following the repository's commit conventions (`git log --oneline -20` shows them). Never bypass hooks. If a hook fails, send the failure back to builder.
       5. **Test.** Send tester: the issue text, acceptance checklist, changed files, and project commands. Commit what tester adds.
-      6. **Review.** Send reviewer: the issue text, acceptance checklist, project commands, and the test results tester reported. It reads the change itself. Record the HEAD SHA it reviewed.
+      6. **Review.** Send reviewer: the issue text, acceptance checklist, project commands, and the test results tester reported. It reads the change itself. Record the HEAD SHA it reviewed, its verdict and its issues, for every round: the PR body reports each one (step 10).
       7. **Fix loop.** Blocker and load-bearing issues from reviewer, and production defects from tester, go back to builder (production code) or tester (tests); then commit and re-run tester. Re-run reviewer with the same inputs plus the last reviewed HEAD SHA, so it reviews the new commits. Repeat until the verdict is Ship it or Approve-with-nits, at most two fix rounds; after that stop and report the open issues to the user.
       8. **Verify** yourself: run the project's build, typecheck/lint and test commands on the committed branch with a clean `git status`. Record each command and its result (pass/fail counts).
-      9. **Ask before publishing.** Show the user: changed files, verification results, the reviewer's verdict and any soft nits left, and the proposed PR title and body. Then end your turn and wait for the user's go-ahead in their next message. Nothing else enforces this stop.
-      10. **Publish.** `git push -u origin HEAD`. Write the PR body to a file in the system temp directory, outside the repository (`/tmp` on Linux and macOS, `$env:TEMP` on Windows), then `gh pr create --title "<title>" --body-file <file>`. The body contains `Closes #{issue}`, what changed and why, and the verification results from step 8. Report the PR URL.
+      9. **Decide to publish.** Publish without asking the user when all of these hold: the reviewer's last verdict is Ship it or Approve-with-nits, step 8 passed, and `git status` is clean. Otherwise do not push or open a PR: stop and report what failed, with the evidence.
+      10. **Publish.** `git push -u origin HEAD`. Write the PR body to a file in the system temp directory, outside the repository (`/tmp` on Linux and macOS, `$env:TEMP` on Windows), then `gh pr create --title "<title>" --body-file <file>`. Report the PR URL. The body uses these sections, in this order, each filled from results you or your team observed (write "None" where there is nothing):
+
+          ```
+          Closes #{issue}
+
+          ## What changed
+          The change, file by file where it helps.
+
+          ## Why
+          The problem from the issue, and the decisions you made with their reasons.
+
+          ## Tests
+          Tests added or changed: file, and the bug each catches (tester's report).
+          How each was seen to fail against broken code (tester's mutations).
+          Pre-screen: the issue-team-test-prescreen result, counts by severity.
+
+          ## Internal review
+          Verdict: the reviewer's final verdict, and the HEAD SHA it reviewed.
+          Rounds: one line per review round — its verdict, the blocker and load-bearing issues it raised, and the commit that fixed each.
+          Open nits: the soft nits left unaddressed, one line each.
+
+          ## Verification
+          Branch and HEAD SHA, clean `git status`; each command from step 8 with its result and pass/fail counts, verbatim.
+          ```
 
       ## Rules
 
