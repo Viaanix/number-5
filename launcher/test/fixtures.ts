@@ -122,6 +122,37 @@ export function writeFakeCommand(directory: string, commandName: string, scriptP
   writeFileSync(join(directory, `${commandName}.cmd`), `@bun "${scriptPath}" %*\r\n`);
 }
 
+/**
+ * Compiles a Bun script into a standalone executable named commandName (plus .exe on
+ * Windows), the way real docker is an executable. Use it instead of writeFakeCommand
+ * when the arguments can hold newlines or shell metacharacters: on Windows a .cmd
+ * launcher goes through cmd.exe, which ends the command at the first newline, so a
+ * multi-line prompt never reaches the script. Prepend the directory to PATH.
+ */
+export function writeFakeExecutable(
+  directory: string,
+  commandName: string,
+  scriptPath: string,
+): void {
+  const executableName = process.platform === "win32" ? `${commandName}.exe` : commandName;
+  const completedProcess = Bun.spawnSync(
+    [
+      process.execPath,
+      "build",
+      "--compile",
+      scriptPath,
+      "--outfile",
+      join(directory, executableName),
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (completedProcess.exitCode !== 0) {
+    throw new Error(
+      `bun build --compile ${scriptPath} failed: ${completedProcess.stderr.toString()}`,
+    );
+  }
+}
+
 /** What a team helper printed and how it exited. */
 export type HelperResult = { exitCode: number; standardOutput: string; standardError: string };
 

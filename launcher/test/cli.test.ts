@@ -19,7 +19,7 @@ import {
   FIXTURE_DEFAULT_BRANCH,
   FIXTURE_FEATURE_BRANCH,
   removeTemporaryDirectories,
-  writeFakeCommand,
+  writeFakeExecutable,
 } from "./fixtures.ts";
 
 afterAll(removeTemporaryDirectories);
@@ -290,7 +290,9 @@ describe("j5 launching", () => {
   test("runs docker in the project with the team's bin first on PATH and returns its exit code", () => {
     const { projectRoot } = createFixtureProject("launch-app");
     const fakeBinDirectory = createTemporaryDirectory();
-    writeFakeCommand(
+    // An executable, not a .cmd: the first message is a multi-line prompt, which
+    // cmd.exe would cut at the first newline on Windows (see writeFakeExecutable).
+    writeFakeExecutable(
       fakeBinDirectory,
       "docker",
       join(import.meta.dir, "fixtures", "fake-docker.ts"),
