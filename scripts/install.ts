@@ -296,7 +296,10 @@ export function runInstaller(
       createLink(linkPath, repositoryRoot, environment.platform);
     });
   } else if (existsSync(linkPath)) {
-    throw new InstallerError(`${linkPath} exists and is not a link; pass --link <other path>`);
+    // "No disassemble!" (Johnny 5): flavor ahead of the real reason, never instead of it.
+    throw new InstallerError(
+      `No disassemble! ${linkPath} exists and is not a link; pass --link <other path>`,
+    );
   } else {
     change(`create link ${linkPath} → ${repositoryRoot}`, () => {
       createLink(linkPath, repositoryRoot, environment.platform);
@@ -323,7 +326,7 @@ export function runInstaller(
       });
     } else {
       skillReport.push(
-        `left ${placement.installedPath} alone: it was not installed by this installer (no ${INSTALLED_SKILL_MARKER_FILE})`,
+        `No disassemble! left ${placement.installedPath} alone: it was not installed by this installer (no ${INSTALLED_SKILL_MARKER_FILE})`,
       );
     }
   }

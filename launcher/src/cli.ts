@@ -27,6 +27,7 @@ import {
   askToChoose,
   askToConfirm,
   LaunchCancelledError,
+  showBanner,
   showNote,
 } from "./prompts.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
@@ -72,8 +73,17 @@ function isTerminal(stream: PossiblyTerminalStream): boolean {
   return stream.isTTY === true;
 }
 
+// Johnny 5 flavor lines (Short Circuit, 1986), added on top of the real output and
+// never instead of it: the help, list and prompts must still read plainly without them.
+const HELP_GREETING = "j5 — Number 5 is alive.";
+const LIST_HEADER = "Input! Input!";
+const INTERACTIVE_BANNER = "Need input!";
+const PARAMETER_PROMPT_PREFIX = "Need input:";
+
 function formatUsage(): string {
   return [
+    HELP_GREETING,
+    "",
     "Usage:",
     "  j5                                    pick everything interactively",
     `  j5 ${LIST_COMMAND}                               teams, entry points, parameters, efforts`,
@@ -280,8 +290,9 @@ async function collectParameterValues(
       throw new UsageError(`missing --${parameterName} <${parameter.type}> (${parameter.label})`);
     }
     interaction.askedAnything = true;
-    parameterValues[parameterName] = await askForText(parameter.label, (value) =>
-      describeInvalidParameterValue(parameterName, parameter, value),
+    parameterValues[parameterName] = await askForText(
+      `${PARAMETER_PROMPT_PREFIX} ${parameter.label}`,
+      (value) => describeInvalidParameterValue(parameterName, parameter, value),
     );
   }
   return parameterValues;
@@ -337,6 +348,9 @@ async function launch(
     );
   }
 
+  if (interaction.canPrompt && requestedTeamName === undefined) {
+    showBanner(INTERACTIVE_BANNER);
+  }
   const team = await chooseTeam(teams, requestedTeamName, interaction);
   const entryPointName = await chooseEntryPointName(team, requestedEntryPointName, interaction);
   const entryPoint = team.entrypoints[entryPointName];
@@ -433,7 +447,7 @@ async function main(commandLineArguments: string[]): Promise<number> {
       throw new Error(`no team manifests found under ${LAUNCHER_REPOSITORY_ROOT}`);
     }
     if (parsedArguments.positionals[0] === LIST_COMMAND) {
-      console.log(formatTeamList(teams));
+      console.log(`${LIST_HEADER}\n\n${formatTeamList(teams)}`);
       return EXIT_CODE_SUCCESS;
     }
     return await launch(parsedArguments, teams);

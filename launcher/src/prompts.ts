@@ -60,6 +60,11 @@ export async function askToConfirm(message: string): Promise<boolean> {
   return unwrapAnswer(await clack.confirm({ message }));
 }
 
+/** Opens the prompt flow with a title line. */
+export function showBanner(title: string): void {
+  clack.intro(title);
+}
+
 /** Prints a titled block of text in the prompt flow. */
 export function showNote(message: string, title: string): void {
   clack.note(message, title);

@@ -168,6 +168,35 @@ async function runCliInTerminal(
 }
 
 describe("j5 in a terminal", () => {
+  // Both cases stop at a prompt; the run is killed at the timeout, which is expected.
+  test("bare j5 opens with the Need input! banner, then the team picker", async () => {
+    const result = await runCliInTerminal([], createTemporaryDirectory());
+    expect(result.timedOut).toBe(true);
+    expect(result.screenText).toContain("Need input!");
+    expect(result.screenText).toContain("Team");
+    expect(result.screenText.indexOf("Need input!")).toBeLessThan(
+      result.screenText.indexOf("Team"),
+    );
+  });
+
+  test("asks for a missing parameter as Need input: <label>", async () => {
+    const { projectRoot } = createFixtureProject("prompt-app");
+    const result = await runCliInTerminal(
+      [
+        "issue-team",
+        "work-issue",
+        "--effort",
+        "low",
+        "--base",
+        `origin/${FIXTURE_DEFAULT_BRANCH}`,
+        "--print",
+      ],
+      projectRoot,
+    );
+    expect(result.timedOut).toBe(true);
+    expect(result.screenText).toContain("Need input: Issue number");
+  });
+
   test("uses the repository around the current directory without asking for it", async () => {
     const { projectRoot } = createFixtureProject("terminal-app");
     const subdirectory = join(projectRoot, "src", "deep");
@@ -283,10 +312,16 @@ describe("j5 list and help", () => {
   test("list shows each issue-team entry point with its parameter, and the efforts", () => {
     const result = runCli(["list"], createTemporaryDirectory());
     expect(result.exitCode).toBe(0);
+    // The flavor header sits above the real listing, which must still follow it.
+    expect(result.standardOutput).toStartWith("Input! Input!\n\nissue-team — ");
     expect(result.standardOutput).toContain("  work-issue --issue <integer>");
     expect(result.standardOutput).toContain("  pr-followup --pr <integer>");
     expect(result.standardOutput).toContain("  closeout --pr <integer>");
     expect(result.standardOutput).toContain("  efforts: low");
+  });
+
+  test("help opens with the greeting, then the usage", () => {
+    expect(formatUsage()).toStartWith("j5 — Number 5 is alive.\n\nUsage:\n");
   });
 
   test("help documents every launcher flag", () => {

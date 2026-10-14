@@ -163,7 +163,9 @@ describe("runInstaller — install", () => {
     const sandbox = createSandbox();
     mkdirSync(sandbox.linkPath);
     writeFileSync(join(sandbox.linkPath, "keep-me"), "");
-    expect(() => install(sandbox)).toThrow("exists and is not a link");
+    expect(() => install(sandbox)).toThrow(
+      `No disassemble! ${sandbox.linkPath} exists and is not a link; pass --link <other path>`,
+    );
     expect(existsSync(join(sandbox.linkPath, "keep-me"))).toBe(true);
   });
 
@@ -417,7 +419,7 @@ describe("runInstaller — skills", () => {
       "the user's own skill\n",
     );
     expect(report).toContain(
-      `left ${installedSkillPath(sandbox)} alone: it was not installed by this installer (no ${INSTALLED_SKILL_MARKER_FILE})`,
+      `No disassemble! left ${installedSkillPath(sandbox)} alone: it was not installed by this installer (no ${INSTALLED_SKILL_MARKER_FILE})`,
     );
   });
 
