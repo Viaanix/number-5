@@ -38,6 +38,10 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q bats
       - run: bun install --frozen-lockfile
       - run: bun run check
+        env:
+          # docker-agent requires the variable to be set even for --dry-run, which
+          # calls no model; validate:teams only dry-runs. Not a secret.
+          ANTHROPIC_API_KEY: placeholder-dry-run-calls-no-model
 
   macos:
     runs-on: macos-latest

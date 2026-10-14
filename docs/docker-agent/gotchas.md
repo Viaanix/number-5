@@ -73,15 +73,62 @@ docker agent run issue-team/team.yaml --agent closer --dry-run --exec x
 
 **Consequence (useful):** a dry run is a safe way to check that a full command line parses, worktree flags included.
 
+### `run --dry-run` still requires the provider's API key to be set
+
+**Observed:** v1.145.0, 2026-10-14.
+
+**Receipt:**
+```bash
+env -u ANTHROPIC_API_KEY docker agent run issue-team/team.yaml --config-dir <empty dir> --dry-run --exec x
+# → "Welcome to docker agent!" setup flow, exit 255 (in CI: "The following environment variables must be set: ANTHROPIC_API_KEY")
+ANTHROPIC_API_KEY=placeholder docker agent run issue-team/team.yaml --config-dir <empty dir> --dry-run --exec x
+# → Dry run mode enabled. Agent initialized but will not execute.   (exit 0)
+```
+
+**Consequence:** a dry run checks that the key is present, not that it is valid. CI needs a value even though no model is called.
+
+**Mitigation:** `.github/workflows/check.yml` sets a placeholder `ANTHROPIC_API_KEY` for `bun run check`.
+
 ### `debug config` is the canonical-config printer
 
 `docker agent debug config <team.yaml> [--flavor X]` prints the fully resolved configuration (instruction files inlined, defaults filled, flavor applied) and exits non-zero with a parse error on an invalid file. It is the fastest validity check there is, and diffing two of its outputs is how you see what a change really does.
+
+## Skills
+
+### A `description: |` block scalar loads as the literal `|`
+
+**Observed:** v1.145.0, 2026-10-14.
+
+**Receipt:** `docker agent debug skills issue-team/team.yaml` lists `+ test-quality-with-ai - |` for tester and reviewer; the skill's frontmatter has `description: |` followed by an indented block.
+
+**Consequence:** the skill is never matched from its description. Agents that need it must name it explicitly. Write skill descriptions as one-line scalars.
+
+### Symlinked skill directories are skipped
+
+**Observed:** v1.145.0 source, commit 502549c (`pkg/skills/local.go`): the flat scan skips entries where `isSymlink` is true, and the recursive scan uses `filepath.WalkDir`, which does not follow links. Not yet exercised with a real symlink.
+
+**Consequence:** installing a skill by linking `~/.agents/skills/<name>` to a checkout does not work; the skill must be copied, and re-copied after changes.
+
+**Search paths** (same source): `~/.codex/skills` (recursive), `~/.claude/skills` (flat), `~/.agents/skills` (recursive), then `.claude/skills` in the working directory and `.github/skills` / `.agents/skills` in each directory from the git root down to it. All built with `filepath.Join`, so identical on every OS.
+
+## Platforms
+
+### The shell tool and script tools use the user's shell, not bash
+
+**Observed:** v1.145.0 source, commit 502549c (`pkg/shellpath/shellpath.go`, `pkg/tools/builtin/shell/script_shell.go`).
+
+- Unix: `$SHELL -c <cmd>`, else `/bin/sh -c`. On a default macOS install that is zsh.
+- Windows: `pwsh.exe`, else `powershell.exe` (`-NoProfile -NonInteractive -Command`), else `cmd.exe /C`.
+- Script-tool arguments reach the command as **environment variables**; `cmd:` is passed to that shell as-is.
+
+**Consequence:** `cmd: helper "$pr"` works under bash and zsh only. Under PowerShell `$pr` is an unset local variable (`$env:pr` is the environment variable); under cmd.exe it is `%pr%`. The portable form is a bare `cmd: helper` with the helper reading its arguments from its environment.
+
+The data directory, and with it `worktrees/`, is `<home>/.cagent` on every OS (`pkg/paths/paths.go`).
 
 ## Unverified
 
 Carried over from `issue-team/README.md` ("Known limits") or reported without a receipt in this repository. Confirm one with a receipt, then move it up.
 
-- **Skill frontmatter is parsed line by line.** A `description: |` block scalar loads as the literal `|`, so the skill is never matched automatically; name it explicitly in the agent's instructions.
 - **Local skills get no `read_skill_file` tool.** Instructions must point at the skill's files by path (e.g. `~/.agents/skills/<name>/...`).
 - **The docs on docker.github.io track `main`**, not the release, and document flags v1.145.0 lacks (e.g. `--last`). Trust `docker agent <command> --help` over the website.
 - **PR worktrees are named `pr-<number>`** without the repository name, so the same PR number in two repositories collides under `~/.cagent/worktrees/`. `daw` refuses a `pr-<n>` worktree whose `origin` is another repository.

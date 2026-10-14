@@ -5,6 +5,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "../src/arguments.ts";
 import { formatUsage } from "../src/cli.ts";
@@ -99,32 +100,55 @@ describe("daw --print", () => {
   });
 });
 
-// Runs daw inside a pseudo-terminal (util-linux `script`), so the launcher believes it
-// may prompt. `timeout` turns "stuck waiting at a prompt" into exit 124, well inside
-// bun test's default 5 s per-test limit.
-const TERMINAL_RUN_TIMEOUT_SECONDS = "3";
-const TIMEOUT_EXIT_CODE = 124;
+// Runs daw attached to a pseudo-terminal (Bun.Terminal), so the launcher believes it
+// may prompt. A launcher stuck at a prompt is killed after the timeout, well inside
+// bun test's default 5 s per-test limit, and reported as timedOut.
+const TERMINAL_RUN_TIMEOUT_MILLISECONDS = 3000;
+// Wide enough that the printed command never wraps.
+const TERMINAL_COLUMNS = 400;
+const TERMINAL_ROWS = 50;
 
-function runCliInTerminal(cliArguments: string[], workingDirectory: string): CliResult {
-  const commandLine = ["bun", CLI_PATH, ...cliArguments].map((word) => `'${word}'`).join(" ");
-  const completedProcess = Bun.spawnSync(
-    ["timeout", TERMINAL_RUN_TIMEOUT_SECONDS, "script", "-qec", commandLine, "/dev/null"],
-    { cwd: workingDirectory, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
-  );
+type TerminalRunResult = { exitCode: number; timedOut: boolean; screenText: string };
+
+async function runCliInTerminal(
+  cliArguments: string[],
+  workingDirectory: string,
+): Promise<TerminalRunResult> {
+  const decoder = new TextDecoder();
+  let rawScreen = "";
+  await using terminal = new Bun.Terminal({
+    cols: TERMINAL_COLUMNS,
+    rows: TERMINAL_ROWS,
+    data(_terminal, data) {
+      rawScreen += decoder.decode(data);
+    },
+  });
+  const childProcess = Bun.spawn(["bun", CLI_PATH, ...cliArguments], {
+    cwd: workingDirectory,
+    terminal,
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    childProcess.kill();
+  }, TERMINAL_RUN_TIMEOUT_MILLISECONDS);
+  const exitCode = await childProcess.exited;
+  clearTimeout(timer);
   return {
-    exitCode: completedProcess.exitCode,
-    standardOutput: completedProcess.stdout.toString().replaceAll("\r", "").trim(),
-    standardError: completedProcess.stderr.toString().trim(),
+    exitCode,
+    timedOut,
+    // Terminals end lines with \r\n and color with escape codes; neither is content.
+    screenText: stripVTControlCharacters(rawScreen).replaceAll("\r", "").trim(),
   };
 }
 
 describe("daw in a terminal", () => {
-  test("uses the repository around the current directory without asking for it", () => {
+  test("uses the repository around the current directory without asking for it", async () => {
     const { projectRoot } = createFixtureProject("terminal-app");
     const subdirectory = join(projectRoot, "src", "deep");
     mkdirSync(subdirectory, { recursive: true });
     // Every other value is a flag, so the project is the only thing left to ask about.
-    const result = runCliInTerminal(
+    const result = await runCliInTerminal(
       [
         "issue-team",
         "work-issue",
@@ -138,9 +162,9 @@ describe("daw in a terminal", () => {
       ],
       subdirectory,
     );
-    expect(result.exitCode).not.toBe(TIMEOUT_EXIT_CODE);
+    expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
-    expect(result.standardOutput).toStartWith(`cd ${realpathSync(projectRoot)} && `);
+    expect(result.screenText).toStartWith(`cd ${realpathSync(projectRoot)} && `);
   });
 });
 
