@@ -6,20 +6,20 @@ A team is a directory under `workflows/`. Copying `workflows/issue-team/` and cu
 
 ```
 workflows/my-team/
-  team.yaml           docker-agent config: models, agents, toolsets, permissions, flavors
-  workflow.yaml       launcher manifest: entry points, parameters, worktree mode, first message
-  instructions/       one <agent>.md per agent (instruction_file)
-  helpers/            deterministic Bun scripts exposed as script tools
+  team.yaml           docker-agent config: agents (harness: claude-code), flavors
+  workflow.yaml       launcher manifest: entry points, parameters, worktree mode, and each entry agent's whole prompt as its message
+  roles/              optional: sub-agent role prompts shared by several entry points, printed by a <team>-role helper
+  helpers/            deterministic Bun scripts the agents run by bare name
   bin/                one sh + one .cmd launcher per helper; listed in workflow.yaml `path`
   README.md           what it does, its agents, its limits
 ```
 
 ## Steps
 
-1. **Write `team.yaml`.** Start from the patterns in [docker-agent/patterns.md](docker-agent/patterns.md). Check it parses: `docker agent debug config workflows/my-team/team.yaml`.
-2. **Write `instructions/<agent>.md`** for each agent: the procedure, what every task message carries, the output format, and the rules (what it must never do).
-3. **Move anything deterministic into a helper** and expose it as a `type: script` tool with a bare `cmd:` (the helper reads its arguments from the environment). Write it as `helpers/<verb>.ts`, using `runHelper` and `readToolArgument` from `launcher/src/team-helper.ts`; logic another team already has (the change diff, the test pre-screen) is a function in `launcher/src/` to call, not code to copy. Copy a launcher pair from `workflows/issue-team/bin/` as `bin/<team>-<verb>` and `bin/<team>-<verb>.cmd`. The `<team>-` prefix keeps two teams' helpers from shadowing each other on `PATH`. Never name a tool argument `path`: arguments reach the helper as environment variables, and on Windows `path` is `PATH`. See [patterns](docker-agent/patterns.md#helpers-that-run-on-every-os).
-4. **Define effort levels** as `flavors:` if the team should have any. Keep each flavor to the keys it changes.
+1. **Write `team.yaml`**: one `harness: claude-code` agent per entry point (no API key needed; see [patterns](docker-agent/patterns.md) for what a harness agent does not get). Check it parses: `docker agent debug config workflows/my-team/team.yaml`.
+2. **Write each entry agent's prompt as its entry point's `message`** in `workflow.yaml`: the procedure, what every sub-agent task carries, the output format, and the rules (what it must never do). `{param}` fills a parameter; write `{{` and `}}` for literal braces.
+3. **Move anything deterministic into a helper** that the prompt tells the agent to run by bare name (the helper reads its arguments from the command line or the environment). Write it as `helpers/<verb>.ts`, using `runHelper` and `readToolArgument` from `launcher/src/team-helper.ts`; logic another team already has (the change diff, the test pre-screen) is a function in `launcher/src/` to call, not code to copy. Copy a launcher pair from `workflows/issue-team/bin/` as `bin/<team>-<verb>` and `bin/<team>-<verb>.cmd`. The `<team>-` prefix keeps two teams' helpers from shadowing each other on `PATH`. Never name a tool argument `path`: arguments reach the helper as environment variables, and on Windows `path` is `PATH`. See [patterns](docker-agent/patterns.md#helpers-that-run-on-every-os).
+4. **Define effort levels** as `flavors:` (for harness agents, `harness.effort`) if the team should have any. Keep each flavor to the keys it changes.
 5. **Write `workflow.yaml`** ([schema](launcher.md#the-manifest-teamworkflowyaml)) with one entry point per way of starting the team.
 6. **Check it:**
    ```bash

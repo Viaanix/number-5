@@ -35,11 +35,9 @@ jobs:
           chmod +x "$HOME/.docker/cli-plugins/docker-agent"
           docker agent version
       - run: bun install --frozen-lockfile
+      # No ANTHROPIC_API_KEY: every team is Claude Code harness agents, whose dry runs
+      # need neither a key nor the claude CLI (docs/docker-agent/gotchas.md).
       - run: bun run check
-        env:
-          # docker-agent requires the variable to be set even for --dry-run, which
-          # calls no model; validate:teams only dry-runs. Not a secret.
-          ANTHROPIC_API_KEY: placeholder-dry-run-calls-no-model
 
   macos:
     runs-on: macos-latest

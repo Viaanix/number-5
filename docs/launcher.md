@@ -78,7 +78,9 @@ entrypoints:
     message: "Work issue #{issue}"   # the first user message
 ```
 
-**Templates.** `message` and `worktree.name` take `{placeholder}`s: any parameter, plus `{repo}` (the project's directory name). An unknown placeholder is a manifest error, never literal text in a prompt.
+**Templates.** `message` and `worktree.name` take `{placeholder}`s: any parameter, plus `{repo}` (the project's directory name). An unknown placeholder is a manifest error, never literal text in a prompt. `{{` and `}}` are literal braces, e.g. `gh api repos/{{owner}}/{{repo}}/pulls/{pr}` sends `repos/{owner}/{repo}/pulls/7`.
+
+**The message is the whole prompt** for a team of Claude Code harness agents (both teams here), since docker-agent gives a harness agent nothing else; write it as a YAML block (`message: |`). `--print` shows it in full.
 
 **Worktree modes.**
 

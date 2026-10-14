@@ -1,133 +1,59 @@
 # Test-quality team: runs the j5-test-quality skill against a project checkout.
 # Entry points are in workflow.yaml; each starts one agent, one skill workflow:
-#   auditor   audit           review-at-scale.md   read-only; report to .j5/review/; hands regions to reader
-#   reviewer  review-branch   review-single.md     read-only; report in the final message
+#   auditor   audit           review-at-scale.md   read-only; report to .j5/review/
+#   reviewer  review-branch   review-single.md     read-only; report in the session
 #   writer    write-tests     generate.md          adds tests in the checkout; no production code
 #   fixer     fix-failing     maintain-failing.md  fixes the code (or, with justification, the test)
-# Every entry point runs in the checkout itself (worktree mode none), on whatever branch
-# is checked out, so the deny rules below keep agents away from the user's git state.
-# Per-repository context comes from that repository's AGENTS.md / CLAUDE.md.
-
-models:
-  lead:
-    provider: anthropic
-    model: claude-sonnet-5-5
-  review:
-    provider: anthropic
-    model: claude-opus-5-5
-
-toolsets:
-  test_prescreen:
-    type: script
-    shell:
-      test_prescreen:
-        # Bare name: `target` reaches the helper as an environment variable, which it
-        # reads itself, so the line works in bash, zsh, PowerShell and cmd.exe alike.
-        cmd: test-quality-prescreen
-        description: Runs the j5-test-quality Tier 1 pre-screen in strict mode. With target (a test file or directory, relative to the project root), scans every test file under it. Without target, scans the test files changed since this branch left the remote default branch, including uncommitted ones; new test files count only after `git add -N <file>`. Prints the findings; a non-zero exit means HIGH findings (1) or that the pre-screen could not run (2).
-        args:
-          target:
-            type: string
-            description: Test file or directory to scan, relative to the project root. Omit to scan the branch's changed test files.
+#
+# Every agent is Claude Code (`harness: claude-code`) on the user's Claude subscription;
+# no API key is needed. A harness agent receives only the task message: docker-agent
+# drops instruction files, toolsets, skills, sub_agents and permission rules for it
+# (docs/docker-agent/gotchas.md). So each agent's whole prompt is its entry point's
+# `message` in workflow.yaml, the helpers in bin/ are called through Claude Code's
+# shell by bare name, and the read-only and no-commit rules are instructions only.
+# Per-repository context comes from that repository's CLAUDE.md, which Claude Code reads.
 
 agents:
   auditor:
-    model: review
     description: Read-only audit of a test suite at scale. Writes one report under .j5/review/ and edits nothing else.
-    instruction_file: instructions/auditor.md
-    add_prompt_files: [AGENTS.md, CLAUDE.md]
-    add_environment_info: true
-    skills: [j5-test-quality]
-    sub_agents: [reader]
-    use_toolsets: [test_prescreen]
-    toolsets:
-      - type: git
-      - type: filesystem
-        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content, create_directory, write_file]
-
-  reader:
-    model: lead
-    description: Reads one region of a test suite for an audit and reports findings with file:line. Read-only. Has no memory of the conversation; every task must name its files and carry the full reader prompt.
-    instruction_file: instructions/reader.md
-    skills: [j5-test-quality]
-    toolsets:
-      - type: filesystem
-        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
+    harness:
+      type: claude-code
+      effort: high
 
   reviewer:
-    model: review
-    description: Independent read-only review of the tests added or changed on the current branch. Cannot edit files.
-    instruction_file: instructions/reviewer.md
-    add_prompt_files: [AGENTS.md, CLAUDE.md]
-    skills: [j5-test-quality]
-    use_toolsets: [test_prescreen]
-    toolsets:
-      - type: git
-      - type: filesystem
-        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
-      - type: script
-        shell:
-          change_diff:
-            # Bare name, no arguments.
-            cmd: test-quality-change-diff
-            description: The branch's change since it left the remote default branch (commits, files, full diff), followed by any uncommitted or untracked work.
+    description: Independent read-only review of the tests added or changed on the current branch.
+    harness:
+      type: claude-code
+      effort: high
 
   writer:
-    model: lead
     description: Writes tests that fail against broken implementations, in the current checkout. Does not edit production code, commit, or push.
-    instruction_file: instructions/writer.md
-    add_prompt_files: [AGENTS.md, CLAUDE.md]
-    add_environment_info: true
-    skills: [j5-test-quality]
-    use_toolsets: [test_prescreen]
-    toolsets:
-      - type: filesystem
-      - type: shell
-      - type: todo
+    harness:
+      type: claude-code
+      effort: high
 
   fixer:
-    model: lead
     description: Finds why a test fails and fixes the cause, in the current checkout. Changes a test only with a written justification. Does not commit or push.
-    instruction_file: instructions/fixer.md
-    add_prompt_files: [AGENTS.md, CLAUDE.md]
-    add_environment_info: true
-    skills: [j5-test-quality]
-    use_toolsets: [test_prescreen]
-    toolsets:
-      - type: filesystem
-      - type: shell
-      - type: todo
-
-# Deny rules always win, in every safety mode. The agents work in the user's own
-# checkout, not a worktree, so anything that moves HEAD, rewrites the index or
-# discards uncommitted work is denied along with commits and pushes. `git add -N`
-# (which the pre-screen needs for new files) stays allowed.
-permissions:
-  deny:
-    - "shell:cmd=*--no-verify*"
-    - "shell:cmd=*git commit*"
-    - "shell:cmd=*git push*"
-    - "shell:cmd=*git reset*"
-    - "shell:cmd=*git checkout*"
-    - "shell:cmd=*git switch*"
-    - "shell:cmd=*git restore*"
-    - "shell:cmd=*git stash*"
-    - "shell:cmd=*git clean*"
-    - "shell:cmd=*git rebase*"
-    - "shell:cmd=*git merge*"
-    - "shell:cmd=*gh pr merge*"
-    - "shell:cmd=*gh repo delete*"
-    - "shell:cmd=*gh release*"
-    - "shell:cmd=*sudo *"
+    harness:
+      type: claude-code
+      effort: high
 
 # Effort levels, chosen with `j5 test-quality ... --effort <name>` (docker agent run
 # --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
-# the file as written (lead sonnet, review opus).
+# the file as written (every agent at effort high).
 # docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
 flavors:
   low:
-    models:
-      lead:
-        model: claude-haiku-4-5
-      review:
-        model: claude-sonnet-5-5
+    agents:
+      auditor:
+        harness:
+          effort: low
+      reviewer:
+        harness:
+          effort: low
+      writer:
+        harness:
+          effort: low
+      fixer:
+        harness:
+          effort: low

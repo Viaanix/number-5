@@ -3,10 +3,14 @@
 # One entry point per j5-test-quality workflow. All of them run in the project checkout
 # itself (worktree mode none): the tests to audit, review, extend or fix are the ones
 # on the branch you have checked out, which a fresh worktree from the base would not have.
+#
+# Each `message` is the agent's whole prompt: the agents are Claude Code harness agents,
+# and docker-agent gives a harness agent nothing but its task message (see team.yaml).
+# In a message, `{name}` is a parameter and `{{` / `}}` are literal braces.
 name: test-quality
 description: Audit, review, write or fix tests with the j5-test-quality skill, in the current checkout
 team: team.yaml
-# The script tools in team.yaml call these helpers by name.
+# The prompts call these helpers by name through Claude Code's shell.
 path: [bin]
 
 entrypoints:
@@ -17,14 +21,86 @@ entrypoints:
       target: { type: string, label: "Test file or directory to audit, relative to the project root" }
     worktree:
       mode: none
-    message: "Audit the tests under {target}."
+    message: |
+      Audit the tests under {target} (a path relative to the project root) and write one report.
+
+      You did not write these tests and owe them no loyalty. This audit is read-only: do not run the project's tests, and do not create, edit or delete any file except the report described below. Do not commit, push, stash, reset, check out or switch anything in git.
+
+      ## The skill
+
+      Follow the j5-test-quality skill. It is not one of your Claude Code skills: run `echo "$HOME"` in the shell, then read `<home>/.agents/skills/j5-test-quality/SKILL.md` and `<home>/.agents/skills/j5-test-quality/workflows/review-at-scale.md` with your file-reading tool, and follow that workflow. Read the checklists and references it names from the same directory, only when it tells you to. Do not use the older test-quality-with-ai skill even if it is available to you. Never guess a test API: identify the framework from the project's existing tests and configuration.
+
+      ## How the workflow maps onto this environment
+
+      - Step 1, Tier 1 grep pass: run `test-quality-prescreen {target}` in the shell (a helper on PATH; exit 1 means HIGH findings, 2 means it could not run). Do not run the skill's script yourself.
+      - Step 2.5, recent commits: read-only git commands (`git log`, `git show`).
+      - Step 4, readers: give each region to a sub-agent with your sub-agent tool, one per region, using the skill's reader prompt template verbatim with only `<region>`, `<count>` and `<contract surface>` filled in, plus the skill directory's absolute path and the instruction to read files only. If the target holds five test files or fewer, skip the readers and review the files yourself with workflows/review-single.md.
+      - Step 6, the deliverable: write it to `.j5/review/test-quality-audit-<YYYY-MM-DD>.md` in the project root, with today's date from `date +%F`. Create `.j5/review/` if it does not exist. If that file already exists, append `-2`, `-3`, … before `.md`; never overwrite an earlier report.
+
+      ## Rules
+
+      - Ground every finding in a file:line you read. Drop findings you cannot point at.
+      - A problem outside the target goes under the report's out-of-scope notes, never under findings.
+
+      ## Output
+
+      After writing the report, reply with the report's path, the verdict by region as the report's table, and the S1 findings, one line each with file:line.
 
   review-branch:
     description: Read-only review of the tests added or changed on the current branch
     agent: reviewer
     worktree:
       mode: none
-    message: "Review the tests added or changed on this branch."
+    message: |
+      Review the tests added or changed on this branch.
+
+      You are an independent reviewer. You did not write these tests and owe them no loyalty. This review is read-only: do not create, edit or delete any file, do not run the project's tests, and do not commit, push, stash, reset, check out or switch anything in git.
+
+      ## The skill
+
+      Follow the j5-test-quality skill. It is not one of your Claude Code skills: run `echo "$HOME"` in the shell, then read `<home>/.agents/skills/j5-test-quality/SKILL.md` and `<home>/.agents/skills/j5-test-quality/workflows/review-single.md` with your file-reading tool, and follow that workflow. Read the checklists and references it names from the same directory, only when it tells you to. Do not use the older test-quality-with-ai skill even if it is available to you. Never guess a test API: identify the framework from the project's existing tests and configuration.
+
+      ## Procedure
+
+      1. Run `test-quality-change-diff` in the shell (a helper on PATH). It prints the branch's commits since it left the remote default branch, then any uncommitted or untracked work. The test files in it are your scope; the production changes in it tell you what those tests must catch. Use it instead of assembling your own git diff.
+      2. Run `test-quality-prescreen` (no argument) for the workflow's Tier 1 pass. Exit 1 means HIGH findings, 2 means it could not run. It covers committed and modified test files; an untracked new test file (`??` in the change) is not in it. Say so for each such file and review it by reading it.
+      3. Follow the workflow's steps for every changed test file. Read each file in full, and the production code it tests.
+      4. For changed production code with no changed test, say which behavior is untested.
+      5. If the branch has no test changes and no production changes, say so in one line and stop.
+
+      ## Rules
+
+      - Report only on changed tests and on gaps the change opens. A problem in a test the branch did not touch goes under Out of scope.
+      - Ground every finding in a file:line you read. Drop findings you cannot point at.
+
+      ## Output
+
+      Use exactly this template. Every section is required; write "None" where there is nothing to report. No praise.
+
+      ```
+      VERDICT: Ship it | Approve-with-nits | Needs work
+
+      ### Scope
+      Branch, base, and the test files reviewed (untracked ones marked).
+
+      ### Pre-screen
+      The test-quality-prescreen result: counts by severity, and each HIGH finding.
+
+      ### Findings
+      1. **Title** — HIGH | MEDIUM | LOW — file:line
+         Pattern (fig-leaf-signals vocabulary), the bug the test misses, and the fix.
+
+      ### Bug each test catches
+      One line per changed test: file:name — the specific bug it catches, or "none stated" when it catches nothing.
+
+      ### Untested changes
+      Changed production behavior with no test that would fail if it broke. Or "None".
+
+      ### Out of scope
+      Pre-existing problems noticed, one line each. Or "None".
+      ```
+
+      Verdict: Needs work for any HIGH finding or untested change; Approve-with-nits for MEDIUM or LOW only; Ship it for nothing.
 
   write-tests:
     description: Write tests that catch real bugs for a file, function or behavior; edits only tests
@@ -33,7 +109,33 @@ entrypoints:
       target: { type: string, label: "What to test (a file, function or behavior)" }
     worktree:
       mode: none
-    message: "Write tests for {target}."
+    message: |
+      Write tests for {target}.
+
+      You work directly in the user's checkout, on whatever branch is checked out, alongside any uncommitted work of theirs. Do not commit, push, stash, reset, check out, restore or switch anything in git; `git add -N <file>` is allowed.
+
+      ## The skill
+
+      Follow the j5-test-quality skill. It is not one of your Claude Code skills: run `echo "$HOME"` in the shell, then read `<home>/.agents/skills/j5-test-quality/SKILL.md` and `<home>/.agents/skills/j5-test-quality/workflows/generate.md` with your file-reading tool, and follow that workflow, including its Step 0: read the framework reference under references/ when one matches the project (Vitest, bun:test); otherwise learn the framework from the existing tests. Do not use the older test-quality-with-ai skill even if it is available to you. Never guess a test API.
+
+      ## Steps
+
+      1. Find the target's code and its existing tests. Follow their location, naming, helpers and fixtures. If the target is ambiguous or does not exist, stop and say what you found.
+      2. Decide which behaviors need a test. For every test you add, state in one sentence the specific bug it catches. Do not add tests for wiring, forwarding, copies or defaults that cannot plausibly break.
+      3. Watch each new test fail against a broken implementation before you trust it: break the line it guards, run the test, see it fail, then restore that line exactly by editing it back (not with git). Report each mutation you made and that you restored it.
+      4. Pre-screen every added or changed test file: run `git add -N <file>` for each new one, then `test-quality-prescreen` (no argument; a helper on PATH; exit 1 means HIGH findings). Fix HIGH findings in your tests; justify any you keep.
+      5. Run the new tests, then the full suite. Report the commands and their pass/fail counts verbatim.
+      6. When a new test fails against the unmodified code, assume the production code is wrong. Do not weaken the test to make it pass; report the defect.
+
+      ## Output
+
+      - Tests added or changed: file, and the bug each catches.
+      - The mutation used to see each test fail, and confirmation it was restored.
+      - Pre-screen result.
+      - Each suite command with its pass/fail counts.
+      - Production defects found: file:line, the failing test, the evidence.
+
+      Do not edit production code except to break and restore it in step 3.
 
   fix-failing:
     description: Find why a test fails and fix the cause; the code is assumed wrong, not the test
@@ -42,4 +144,27 @@ entrypoints:
       test: { type: string, label: "The failing test (file, test name or failing command)" }
     worktree:
       mode: none
-    message: "This test fails: {test}. Find out why and fix the cause."
+    message: |
+      This test fails: {test}. Find out why and fix the cause.
+
+      You work directly in the user's checkout, on whatever branch is checked out, alongside any uncommitted work of theirs. Do not commit, push, stash, reset, check out, restore or switch anything in git.
+
+      ## The skill
+
+      Follow the j5-test-quality skill. It is not one of your Claude Code skills: run `echo "$HOME"` in the shell, then read `<home>/.agents/skills/j5-test-quality/SKILL.md` and `<home>/.agents/skills/j5-test-quality/workflows/maintain-failing.md` with your file-reading tool, and follow that workflow. Read the framework reference under references/ when one matches the project (Vitest, bun:test) before touching any test code. Do not use the older test-quality-with-ai skill even if it is available to you. Never guess a test API.
+
+      ## Steps
+
+      1. Reproduce the failure. Run the test alone, then in its suite, and record both results verbatim. If it passes in both, stop and report that it does not fail here, with the commands.
+      2. Investigate in the workflow's order before changing anything. The default holds: the code is wrong, the test is right.
+      3. Fix the cause in the production code. Change the test only for one of the workflow's legitimate reasons, and write the justification: which behavior changed, why, and why the old assertion is no longer correct. Never weaken, skip or delete a test to make it pass.
+      4. If you changed a test file, pre-screen it with `test-quality-prescreen` (no argument; a helper on PATH; exit 1 means HIGH findings).
+      5. Run the failing test, then the full suite. Report the commands and their pass/fail counts verbatim.
+
+      ## Output
+
+      - Root cause: file:line and the evidence.
+      - What you changed: file, and why. For any test change, the written justification.
+      - Pre-screen result, if a test changed.
+      - Each command run, with its pass/fail counts, before and after.
+      - Anything left failing, and why.

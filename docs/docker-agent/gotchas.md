@@ -87,7 +87,7 @@ ANTHROPIC_API_KEY=placeholder docker agent run workflows/issue-team/team.yaml --
 
 **Consequence:** a dry run checks that the key is present, not that it is valid. CI needs a value even though no model is called.
 
-**Mitigation:** `.github/workflows/check.yml` sets a placeholder `ANTHROPIC_API_KEY` for `bun run check`.
+**Scope:** native model agents only. A config whose agents are all `harness: claude-code` dry-runs with no key, an empty `--config-dir`, and no `claude` on `PATH` (both teams here, 2026-10-14: `Dry run mode enabled…`, exit 0). CI therefore sets no key; a team that adds a native agent needs a placeholder `ANTHROPIC_API_KEY` in `.github/workflows/check.yml` again.
 
 ### `doctor` reports a credential as found when it is only set
 
@@ -108,6 +108,10 @@ exit 1
 **Receipt:** an agent with `harness: { type: claude-code, effort: low }` plus `instruction_file` (telling it to say a marker word first), a `type: script` tool `probe_tool` and `skills: [j5-test-quality]`. `debug config` accepts it and `debug toolsets` lists `probe_tool` and `read_skill`. A real `docker agent run full.yaml --exec` asked about all three answered `NONE` / `no` / `no`: no instruction, no script tool, no `read_skill`. (The agent's own report; consistent with the builder's tools in `workflows/issue-team/README.md`.)
 
 **Consequence:** for a harness agent the task message is the only channel docker-agent provides. Prompts, tools and skills declared in `team.yaml` are silently dropped, and neither `debug` nor a dry run shows it.
+
+`sub_agents` are dropped the same way: a harness `root` with `sub_agents: [helper]`, told to call `transfer_task` on `helper` or answer `NO SUCH TOOL`, answered `NO SUCH TOOL` (same date and versions). A harness agent delegates only through Claude Code's own sub-agent tool, and that works: a harness agent told to start one sub-agent that runs `issue-team-role tester | head -1` returned the first line of `roles/tester.md`, with the sub-agent's `agentId` and one tool use in the output. Sub-agents see the launcher's `PATH` too.
+
+The conversation does carry over: two `--exec` turns of one harness agent with the same `--session <id>` (and `-s <scratch session.db>`); turn 1 "Remember the word KIWI", turn 2 "Which word …?" answered `KIWI`. An agent that stops to ask the user can be answered in a later turn.
 
 **What does reach it:** the docker-agent process's `PATH`. With a team's `bin/` prepended (as `j5` does), the harness ran `test-quality-prescreen` by bare name through its own shell tool and got the helper's real output and exit code.
 

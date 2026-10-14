@@ -6,7 +6,7 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 | Path | What |
 |---|---|
-| `workflows/<team>/` | One team per directory under `workflows/` (the launcher scans only there): `team.yaml` (docker-agent), `workflow.yaml` (launcher manifest), `instructions/`, `bin/`. `workflows/issue-team/` is the reference team; `workflows/test-quality/` runs the `j5-test-quality` skill |
+| `workflows/<team>/` | One team per directory under `workflows/` (the launcher scans only there): `team.yaml` (docker-agent; Claude Code harness agents), `workflow.yaml` (launcher manifest; each entry agent's whole prompt is its `message`), `helpers/` + `bin/`, `roles/` (issue-team's sub-agent prompts). `workflows/issue-team/` is the reference team; `workflows/test-quality/` runs the `j5-test-quality` skill |
 | `launcher/src/` | The `j5` CLI (Bun + TypeScript). `cli.ts` is the entry; `plan.ts` builds the docker-agent command and has no side effects. Also the code team helpers share (`team-helper.ts`, `change-diff.ts`, `test-prescreen.ts`), so no team imports another |
 | `launcher/test/` | bun:test tests; real temporary git repositories, no module mocks |
 | `skills/` | Agent skills shipped with the teams (`j5-test-quality`); the installer copies them to `~/.agents/skills/` |
@@ -33,7 +33,7 @@ bun run validate:teams   # manifests, agents, configs, flavors, dry runs against
 ## Conventions
 
 - Type-aware lint is on (`options.typeAware`). When a finding comes from a wrong third-party type, fix the type you read it through (see `isTerminal` in `launcher/src/cli.ts`) instead of disabling the rule.
-- Formatting: oxfmt covers TS/JS/JSON only. Markdown and YAML are excluded on purpose: agent prompts (`instructions/*.md`) and `team.yaml` are hand-formatted model input.
+- Formatting: oxfmt covers TS/JS/JSON only. Markdown and YAML are excluded on purpose: agent prompts (`workflow.yaml` messages, `roles/*.md`) and `team.yaml` are hand-formatted model input.
 - Verbose names, no abbreviations; comments carry *why*. Named constants instead of magic values.
 - Tests: say what bug each test catches. No `mock.module`; inject paths and use real git repositories (`launcher/test/fixtures.ts`).
 - Shell: `#!/usr/bin/env bash`, `set -euo pipefail`, shellcheck-clean at style level without inline disables.
