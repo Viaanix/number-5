@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Print the change under review: commits on this branch since it left the remote
+# default branch with their full diff, then any uncommitted or untracked work.
+# With a SHA argument (the last reviewed HEAD), the commits added after it are
+# printed first as the review scope, and the full change follows as context.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+base=$("$here/issue-team-base-ref")
+mb=$(git merge-base HEAD "$base")
+since=${1:-}
+
+if [[ -n $since ]] && { [[ ! $since =~ ^[0-9a-f]{7,40}$ ]] || ! git merge-base --is-ancestor "$since" HEAD 2>/dev/null; }; then
+  echo "scope: full (since '$since' is not a commit in this branch's history, e.g. after a rebase or force-push)"
+  since=""
+elif [[ -n $since ]]; then
+  echo "scope: new-commits since $since"
+else
+  echo "scope: full"
+fi
+echo "base: $base  merge-base: $mb"
+
+if [[ -n $since ]]; then
+  echo
+  echo "## New commits (review scope)"
+  git log --oneline "$since..HEAD"
+  echo
+  git diff "$since" HEAD
+  echo
+  echo "## Full change (context only)"
+fi
+
+echo
+echo "## Commits"
+git log --oneline "$mb..HEAD"
+echo
+echo "## Files"
+git diff --stat "$mb" HEAD
+echo
+echo "## Diff"
+git diff "$mb" HEAD
+
+dirty=$(git status --porcelain)
+if [[ -n $dirty ]]; then
+  printf '\n## Uncommitted work (not in the commits above; read ?? files directly)\n%s\n\n' "$dirty"
+  git diff HEAD
+fi

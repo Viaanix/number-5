@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Entry point for the docker-agent-workflows launcher (launcher/src/cli.ts).
+# Usually reached through the `daw` alias that scripts/install.sh adds, via a symlink
+# to this repository in your home directory; the real path is resolved first so the
+# launcher finds its teams wherever the repository is cloned.
+set -euo pipefail
+
+script_path=$(readlink -f "${BASH_SOURCE[0]}")
+repository_root=$(cd "$(dirname "$script_path")/.." && pwd)
+
+if ! command -v bun >/dev/null; then
+  echo "daw: bun is not installed (https://bun.sh)" >&2
+  exit 1
+fi
+if [[ ! -d $repository_root/node_modules ]]; then
+  echo "daw: dependencies are missing; run: bun install --cwd '$repository_root'" >&2
+  exit 1
+fi
+
+exec bun "$repository_root/launcher/src/cli.ts" "$@"

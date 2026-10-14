@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Print the remote default branch as a remote-tracking ref (e.g. origin/main).
+set -euo pipefail
+
+if ref=$(git symbolic-ref -q --short refs/remotes/origin/HEAD); then
+  echo "$ref"
+  exit 0
+fi
+
+# origin/HEAD is unset in some clones; ask GitHub instead.
+name=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+echo "origin/$name"

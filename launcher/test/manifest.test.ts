@@ -1,0 +1,237 @@
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+import { loadManifest } from "../src/manifest.ts";
+import { readTeamConfigSummary } from "../src/team-config.ts";
+import { discoverTeams } from "../src/teams.ts";
+import {
+  buildTeamYaml,
+  createTemporaryDirectory,
+  removeTemporaryDirectories,
+  writeTeamFixture,
+} from "./fixtures.ts";
+
+afterAll(removeTemporaryDirectories);
+
+const VALID_MANIFEST_YAML = `
+name: sample-team
+description: A team used by the tests
+team: team.yaml
+path: [bin]
+entrypoints:
+  work-issue:
+    description: Work one issue
+    agent: root
+    parameters:
+      issue: { type: integer, label: Issue number }
+    worktree: { mode: new, name: "{repo}-issue-{issue}" }
+    message: "Work issue #{issue}"
+  chat:
+    description: Talk in the current checkout
+    agent: root
+    worktree: { mode: none }
+    message: "Hello"
+`;
+
+function writeManifest(manifestYaml: string): string {
+  return writeTeamFixture(createTemporaryDirectory(), manifestYaml, buildTeamYaml([]));
+}
+
+// Replaces the work-issue entry point of the valid manifest with the given YAML lines.
+function manifestWithWorkIssue(entryPointYaml: string): string {
+  return `
+name: sample-team
+description: A team used by the tests
+team: team.yaml
+entrypoints:
+  work-issue:
+${entryPointYaml}
+`;
+}
+
+describe("loadManifest", () => {
+  test("resolves team and PATH directories against the manifest's directory and fills defaults", () => {
+    const manifestPath = writeManifest(VALID_MANIFEST_YAML);
+    const teamDirectory = join(manifestPath, "..");
+    const manifest = loadManifest(manifestPath);
+
+    expect(manifest.directory).toBe(teamDirectory);
+    expect(manifest.teamConfigPath).toBe(join(teamDirectory, "team.yaml"));
+    expect(manifest.pathDirectories).toEqual([join(teamDirectory, "bin")]);
+    expect(manifest.entrypoints.chat).toEqual({
+      description: "Talk in the current checkout",
+      agent: "root",
+      parameters: {},
+      worktree: { mode: "none" },
+      message: "Hello",
+    });
+  });
+
+  test("rejects a misspelled key instead of ignoring it", () => {
+    const manifestPath = writeManifest(
+      VALID_MANIFEST_YAML.replace('message: "Hello"', 'mesage: "Hello"'),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(/invalid manifest/);
+  });
+
+  test("rejects an unknown worktree mode", () => {
+    const manifestPath = writeManifest(VALID_MANIFEST_YAML.replace("mode: none", "mode: sandbox"));
+    expect(() => loadManifest(manifestPath)).toThrow(/invalid manifest/);
+  });
+
+  test("rejects a placeholder in the message that is neither a parameter nor {repo}", () => {
+    const manifestPath = writeManifest(
+      manifestWithWorkIssue(`    description: d
+    agent: root
+    parameters:
+      issue: { type: integer, label: Issue }
+    worktree: { mode: none }
+    message: "Work issue #{isue}"`),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(
+      "entrypoints.work-issue.message: unknown placeholder {isue}",
+    );
+  });
+
+  test("rejects an unknown placeholder in a new worktree's name", () => {
+    const manifestPath = writeManifest(
+      manifestWithWorkIssue(`    description: d
+    agent: root
+    worktree: { mode: new, name: "{repo}-{branch}" }
+    message: "Go"`),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(
+      "entrypoints.work-issue.worktree.name: unknown placeholder {branch}",
+    );
+  });
+
+  test.each(["project", "effort", "base", "print", "help", "repo"])(
+    "rejects a parameter named %p, which the launcher reserves",
+    (reservedName) => {
+      const manifestPath = writeManifest(
+        manifestWithWorkIssue(`    description: d
+    agent: root
+    parameters:
+      ${reservedName}: { type: string, label: L }
+    worktree: { mode: none }
+    message: "Go"`),
+      );
+      expect(() => loadManifest(manifestPath)).toThrow(
+        `entrypoints.work-issue.parameters.${reservedName}: name is reserved by the launcher`,
+      );
+    },
+  );
+
+  test("rejects a parameter name that cannot be a --flag", () => {
+    const manifestPath = writeManifest(
+      manifestWithWorkIssue(`    description: d
+    agent: root
+    parameters:
+      Issue_Number: { type: integer, label: L }
+    worktree: { mode: none }
+    message: "Go"`),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(
+      "entrypoints.work-issue.parameters.Issue_Number: name must match",
+    );
+  });
+
+  test("rejects a PR worktree whose PR parameter is undeclared", () => {
+    const manifestPath = writeManifest(
+      manifestWithWorkIssue(`    description: d
+    agent: followup
+    worktree: { mode: pr, pull_request_parameter: pr }
+    message: "Go"`),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(
+      "entrypoints.work-issue.worktree.pull_request_parameter: 'pr' is not a declared parameter",
+    );
+  });
+
+  test("rejects a PR worktree whose PR parameter is a string", () => {
+    const manifestPath = writeManifest(
+      manifestWithWorkIssue(`    description: d
+    agent: followup
+    parameters:
+      pr: { type: string, label: PR }
+    worktree: { mode: pr, pull_request_parameter: pr }
+    message: "Go"`),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(
+      "entrypoints.work-issue.worktree.pull_request_parameter: 'pr' must be an integer parameter",
+    );
+  });
+
+  test("rejects a manifest whose team file does not exist", () => {
+    const manifestPath = writeManifest(
+      VALID_MANIFEST_YAML.replace("team: team.yaml", "team: missing.yaml"),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(/team: .*missing\.yaml does not exist/);
+  });
+});
+
+describe("discoverTeams", () => {
+  test("loads manifests one level down, skips directories without one, sorts by name", () => {
+    const repositoryRoot = createTemporaryDirectory();
+    writeTeamFixture(
+      join(repositoryRoot, "zeta"),
+      VALID_MANIFEST_YAML.replace("name: sample-team", "name: zeta-team"),
+      buildTeamYaml([]),
+    );
+    writeTeamFixture(
+      join(repositoryRoot, "alpha"),
+      VALID_MANIFEST_YAML.replace("name: sample-team", "name: alpha-team"),
+      buildTeamYaml([]),
+    );
+    mkdirSync(join(repositoryRoot, "docs"));
+
+    expect(discoverTeams(repositoryRoot).map((team) => team.name)).toEqual([
+      "alpha-team",
+      "zeta-team",
+    ]);
+  });
+
+  test("rejects two manifests with the same name", () => {
+    const repositoryRoot = createTemporaryDirectory();
+    writeTeamFixture(join(repositoryRoot, "one"), VALID_MANIFEST_YAML, buildTeamYaml([]));
+    writeTeamFixture(join(repositoryRoot, "two"), VALID_MANIFEST_YAML, buildTeamYaml([]));
+    expect(() => discoverTeams(repositoryRoot)).toThrow(
+      "two team manifests are named 'sample-team'",
+    );
+  });
+});
+
+describe("readTeamConfigSummary", () => {
+  test("reads agent names and flavor names in declaration order", () => {
+    const manifestPath = writeTeamFixture(
+      createTemporaryDirectory(),
+      VALID_MANIFEST_YAML,
+      buildTeamYaml(["max", "low"]),
+    );
+    expect(readTeamConfigSummary(join(manifestPath, "..", "team.yaml"))).toEqual({
+      agentNames: ["root"],
+      flavorNames: ["max", "low"],
+    });
+  });
+
+  test("reports no flavors for a team without a flavors section", () => {
+    const manifestPath = writeTeamFixture(
+      createTemporaryDirectory(),
+      VALID_MANIFEST_YAML,
+      buildTeamYaml([]),
+    );
+    expect(readTeamConfigSummary(join(manifestPath, "..", "team.yaml")).flavorNames).toEqual([]);
+  });
+
+  test("rejects a file with no agents map", () => {
+    const manifestPath = writeTeamFixture(
+      createTemporaryDirectory(),
+      VALID_MANIFEST_YAML,
+      "models: {}\n",
+    );
+    expect(() => readTeamConfigSummary(join(manifestPath, "..", "team.yaml"))).toThrow(
+      /not a team config/,
+    );
+  });
+});

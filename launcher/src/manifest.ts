@@ -1,0 +1,165 @@
+// A team directory becomes launchable by adding a workflow.yaml manifest next to its
+// team.yaml. The manifest says which agent each entry point starts, which parameters
+// the user must supply, how the git worktree is prepared, and the first message.
+// docker-agent itself knows nothing about this file; only the launcher reads it.
+
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
+import { z } from "zod";
+
+import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "./arguments.ts";
+import { extractPlaceholderNames } from "./template.ts";
+
+/** File name the launcher looks for in each top-level directory of this repository. */
+export const MANIFEST_FILE_NAME = "workflow.yaml";
+
+/** Placeholder every template may use: the basename of the project's git toplevel. */
+export const BUILT_IN_REPOSITORY_PLACEHOLDER = "repo";
+
+// Parameter names become `--<name>` command-line flags, so they are kept to
+// lowercase words joined by hyphens.
+const PARAMETER_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+// Flags the launcher owns; a manifest parameter with one of these names would be
+// unreachable from the command line.
+const RESERVED_PARAMETER_NAMES: string[] = [
+  BUILT_IN_REPOSITORY_PLACEHOLDER,
+  ...LAUNCHER_VALUE_OPTION_NAMES,
+  ...LAUNCHER_SWITCH_NAMES,
+];
+
+const parameterSchema = z.strictObject({
+  type: z.enum(["integer", "string"]),
+  label: z.string().min(1),
+});
+
+const worktreeSchema = z.discriminatedUnion("mode", [
+  // Run in the project checkout itself; edits land on whatever branch is checked out.
+  z.strictObject({ mode: z.literal("none") }),
+  // A fresh worktree named from a template, branched from a base ref the user picks
+  // (default: the remote default branch).
+  z.strictObject({ mode: z.literal("new"), name: z.string().min(1) }),
+  // A worktree on an existing pull request's branch; the named parameter holds the PR number.
+  z.strictObject({ mode: z.literal("pr"), pull_request_parameter: z.string().min(1) }),
+]);
+
+const entryPointSchema = z.strictObject({
+  description: z.string().min(1),
+  agent: z.string().min(1),
+  parameters: z.record(z.string(), parameterSchema).default({}),
+  worktree: worktreeSchema,
+  message: z.string().min(1),
+});
+
+const manifestSchema = z.strictObject({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  team: z.string().min(1),
+  path: z.array(z.string().min(1)).default([]),
+  entrypoints: z.record(z.string(), entryPointSchema),
+});
+
+/** One user-supplied value an entry point needs, such as an issue number. */
+export type ParameterDefinition = z.infer<typeof parameterSchema>;
+
+/** How the launcher prepares the git checkout the agent runs in. */
+export type WorktreeDefinition = z.infer<typeof worktreeSchema>;
+
+/** One way of starting a team: an agent, its parameters, worktree mode and first message. */
+export type EntryPointDefinition = z.infer<typeof entryPointSchema>;
+
+/** A parsed and cross-checked workflow.yaml, with paths resolved against its directory. */
+export type WorkflowManifest = z.infer<typeof manifestSchema> & {
+  /** Absolute path of the directory holding workflow.yaml. */
+  directory: string;
+  /** Absolute path of the docker-agent team configuration. */
+  teamConfigPath: string;
+  /** Absolute paths prepended to PATH for the docker-agent process. */
+  pathDirectories: string[];
+};
+
+/**
+ * Checks the rules a schema cannot express: parameter names, template placeholders,
+ * and the PR parameter reference. Returns one message per problem; empty means valid.
+ */
+export function findManifestProblems(manifest: z.infer<typeof manifestSchema>): string[] {
+  const problems: string[] = [];
+  for (const [entryPointName, entryPoint] of Object.entries(manifest.entrypoints)) {
+    const where = `entrypoints.${entryPointName}`;
+    const declaredParameterNames = Object.keys(entryPoint.parameters);
+
+    for (const parameterName of declaredParameterNames) {
+      if (!PARAMETER_NAME_PATTERN.test(parameterName)) {
+        problems.push(
+          `${where}.parameters.${parameterName}: name must match ${PARAMETER_NAME_PATTERN}`,
+        );
+      }
+      if (RESERVED_PARAMETER_NAMES.includes(parameterName)) {
+        problems.push(`${where}.parameters.${parameterName}: name is reserved by the launcher`);
+      }
+    }
+
+    const allowedPlaceholders = [BUILT_IN_REPOSITORY_PLACEHOLDER, ...declaredParameterNames];
+    const templates: Array<[string, string]> = [["message", entryPoint.message]];
+    if (entryPoint.worktree.mode === "new") {
+      templates.push(["worktree.name", entryPoint.worktree.name]);
+    }
+    for (const [templateField, template] of templates) {
+      for (const placeholderName of extractPlaceholderNames(template)) {
+        if (!allowedPlaceholders.includes(placeholderName)) {
+          problems.push(`${where}.${templateField}: unknown placeholder {${placeholderName}}`);
+        }
+      }
+    }
+
+    if (entryPoint.worktree.mode === "pr") {
+      const pullRequestParameterName = entryPoint.worktree.pull_request_parameter;
+      const pullRequestParameter = entryPoint.parameters[pullRequestParameterName];
+      if (pullRequestParameter === undefined) {
+        problems.push(
+          `${where}.worktree.pull_request_parameter: '${pullRequestParameterName}' is not a declared parameter`,
+        );
+      } else if (pullRequestParameter.type !== "integer") {
+        problems.push(
+          `${where}.worktree.pull_request_parameter: '${pullRequestParameterName}' must be an integer parameter`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * Reads, validates and resolves the workflow.yaml at the given path.
+ * @throws Error naming the file and every problem found, when the manifest is invalid.
+ */
+export function loadManifest(manifestPath: string): WorkflowManifest {
+  const absoluteManifestPath = resolve(manifestPath);
+  const rawDocument: unknown = Bun.YAML.parse(readFileSync(absoluteManifestPath, "utf8"));
+  const parseResult = manifestSchema.safeParse(rawDocument);
+  if (!parseResult.success) {
+    throw new Error(
+      `${absoluteManifestPath}: invalid manifest\n${z.prettifyError(parseResult.error)}`,
+    );
+  }
+
+  const problems = findManifestProblems(parseResult.data);
+  const directory = dirname(absoluteManifestPath);
+  const teamConfigPath = join(directory, parseResult.data.team);
+  if (!existsSync(teamConfigPath)) {
+    problems.push(`team: ${teamConfigPath} does not exist`);
+  }
+  if (problems.length > 0) {
+    throw new Error(`${absoluteManifestPath}: invalid manifest\n  ${problems.join("\n  ")}`);
+  }
+
+  return {
+    ...parseResult.data,
+    directory,
+    teamConfigPath,
+    pathDirectories: parseResult.data.path.map((relativeDirectory) =>
+      join(directory, relativeDirectory),
+    ),
+  };
+}

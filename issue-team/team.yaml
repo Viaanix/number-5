@@ -1,0 +1,133 @@
+# Issue team: issue → PR → review follow-up → post-merge closeout, in any GitHub repository.
+# Entry points are the shell functions in issue-team.sh; each picks one entry agent:
+#   root      work-issue <n>   fresh worktree from the remote default branch → opened PR
+#   followup  pr-followup <n>  worktree on the PR branch → fixes pushed, threads answered
+#   closeout  closeout <n>     fresh worktree at the latest default branch → verified, open threads filed as issues, issues closed
+# Per-repository context comes from that repository's AGENTS.md / CLAUDE.md.
+
+models:
+  lead:
+    provider: anthropic
+    model: claude-sonnet-5
+  review:
+    provider: anthropic
+    model: claude-opus-5
+
+toolsets:
+  pr_threads:
+    type: script
+    shell:
+      pr_threads:
+        cmd: issue-team-pr-threads "$pr"
+        description: Unresolved review threads on a pull request, one JSON object per thread (thread id, path, line, outdated flag, comments with databaseId, author, body, url).
+        args:
+          pr:
+            type: integer
+            description: Pull request number
+        required: [pr]
+
+agents:
+  root:
+    model: lead
+    description: Owns one GitHub issue from a fresh worktree to an opened pull request
+    instruction_file: instructions/root.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    sub_agents: [builder, tester, reviewer]
+    toolsets:
+      - type: shell
+      - type: todo
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content, write_file]
+
+  builder:
+    description: Implements a scoped code change in the current worktree. Has no memory of the conversation; every task must be self-contained.
+    harness:
+      type: claude-code
+      effort: high
+
+  tester:
+    model: lead
+    description: Writes tests that fail against broken implementations, audits changed tests, runs suites. Does not edit production code.
+    instruction_file: instructions/tester.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    skills: [test-quality-with-ai]
+    toolsets:
+      - type: filesystem
+      - type: shell
+
+  reviewer:
+    model: review
+    description: Independent read-only review of the branch's full change against the issue. Cannot edit files.
+    instruction_file: instructions/reviewer.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    skills: [test-quality-with-ai]
+    toolsets:
+      - type: git
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
+      - type: script
+        shell:
+          change_diff:
+            cmd: issue-team-change-diff "$since"
+            description: The branch's change since it left the remote default branch, followed by any uncommitted or untracked work. With `since` (a commit SHA you were given as last reviewed), the commits added after it come first, as the scope of this review.
+            args:
+              since:
+                type: string
+                description: Commit SHA of the last reviewed HEAD. Omit for a full review.
+
+  followup:
+    model: lead
+    description: Resolves review threads and failing checks on an existing pull request branch
+    instruction_file: instructions/followup.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    sub_agents: [builder, tester, reviewer]
+    use_toolsets: [pr_threads]
+    toolsets:
+      - type: shell
+      - type: todo
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content, write_file]
+
+  closeout:
+    model: lead
+    description: After a pull request merges, verifies the default branch, files issues for its open review threads, and closes the linked issues with evidence
+    instruction_file: instructions/closeout.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    use_toolsets: [pr_threads]
+    toolsets:
+      - type: shell
+      - type: todo
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content, write_file]
+
+# Deny rules always win, in every safety mode. They cover docker-agent's own shell tool;
+# the builder harness (Claude Code) runs its own tools outside these rules.
+permissions:
+  deny:
+    - "shell:cmd=*--no-verify*"
+    - "shell:cmd=*git push*--force*"
+    - "shell:cmd=*git push* -f*"
+    - "shell:cmd=*git reset --hard*"
+    - "shell:cmd=*gh pr merge*"
+    - "shell:cmd=*gh repo delete*"
+    - "shell:cmd=*gh release*"
+    - "shell:cmd=*sudo *"
+
+# Effort levels, chosen with `daw ... --effort <name>` (docker agent run --flavor <name>).
+# A flavor is a YAML patch deep-merged over this file. No flavor = the file as written
+# (builder effort high, lead sonnet, review opus).
+# docker-agent ignores an unknown --flavor silently; daw rejects names not listed here.
+flavors:
+  low:
+    models:
+      lead:
+        model: claude-haiku-4-5
+      review:
+        model: claude-sonnet-5
+    agents:
+      builder:
+        harness:
+          effort: low

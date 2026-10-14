@@ -1,0 +1,40 @@
+# Launcher manifest for the issue team: how `daw` starts it. docker-agent never reads
+# this file. Schema and rules: launcher/src/manifest.ts and docs/launcher.md.
+# These three entry points replace the shell functions in issue-team.sh one for one.
+name: issue-team
+description: GitHub issue → pull request → review follow-up → post-merge closeout
+team: team.yaml
+# The script tools in team.yaml call these helpers by name.
+path: [bin]
+
+entrypoints:
+  work-issue:
+    description: Take an issue to an opened PR, in a fresh worktree from the base branch
+    agent: root
+    parameters:
+      issue: { type: integer, label: Issue number }
+    worktree:
+      mode: new
+      # The repository name keeps the same issue number in two repositories apart.
+      name: "{repo}-issue-{issue}"
+    message: "Work issue #{issue}"
+
+  pr-followup:
+    description: Fix review threads and failing checks on an open PR, on its own branch
+    agent: followup
+    parameters:
+      pr: { type: integer, label: Pull request number }
+    worktree:
+      mode: pr
+      pull_request_parameter: pr
+    message: "Follow up on PR #{pr}: unresolved review threads, review comments, failing checks."
+
+  closeout:
+    description: After a PR merges, verify the default branch, file open threads, close linked issues
+    agent: closeout
+    parameters:
+      pr: { type: integer, label: Merged pull request number }
+    worktree:
+      mode: new
+      name: "{repo}-closeout-pr-{pr}"
+    message: "PR #{pr} is merged. Close it out."
