@@ -6,7 +6,7 @@ Single canonical pre-claim checklist. Referenced from each workflow.
 
 ## Tier 1 — automated
 
-- [ ] **Tier 1 pre-screen passes.** `scripts/check-test-quality.sh --strict` against the test files (or `--diff` for the PR scope) returns exit 0. HIGH-severity grep findings resolved.
+- [ ] **Tier 1 pre-screen passes.** `scripts/check-test-quality.ts --strict` against the test files (or `--diff` for the PR scope) returns exit 0. HIGH-severity grep findings resolved.
 
 ## Tier 2 — judgment
 
@@ -77,7 +77,7 @@ The skill exists to defend the integrity of the "tested" claim. An agent that de
 
 ## Cross-references
 
-- `scripts/check-test-quality.sh` — automates Tier 1
+- `scripts/check-test-quality.ts` — automates Tier 1
 - `checklists/fig-leaf-signals.md` — detection patterns referenced above
 - `checklists/mock-antipatterns.md` — mock-specific patterns referenced above
 - `references/assertion-shape.md` — canonical-shape lock detail

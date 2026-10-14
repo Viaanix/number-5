@@ -182,4 +182,4 @@ Behavior is consistent across the three. The pattern applies regardless of frame
 - `checklists/fig-leaf-signals.md` — broader detection patterns including assertion-strength smells
 - `workflows/review-at-scale.md` — applies this reference during suite audits when the contract-surface lens fits
 - `workflows/generate.md` — applies this reference when writing tests for new contract surfaces
-- `scripts/check-test-quality.sh` — Tier 1 script does NOT cover the `toMatchObject` ratio check; AST-level escalation; see this file for the manual / Tier 2 check
+- `scripts/check-test-quality.ts` — Tier 1 script does NOT cover the `toMatchObject` ratio check; AST-level escalation; see this file for the manual / Tier 2 check

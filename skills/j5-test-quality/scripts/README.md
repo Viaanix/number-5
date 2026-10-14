@@ -1,34 +1,33 @@
-# check-test-quality.sh
+# check-test-quality.ts
 
-Tier 1 grep-based pre-screen for test fig-leaf signals. Bundled with the `test-quality-with-ai` skill.
+Tier 1 pattern-based pre-screen for test fig-leaf signals. Bundled with the `j5-test-quality` skill. A TypeScript port of `check-test-quality.sh` v0.1.3 from `test-quality-with-ai`; see [Version history](#version-history) for what differs.
 
 Catches the deterministic anti-patterns the skill enumerates without requiring LLM analysis. Use as a fast pre-screen before declaring tests "done," or as a CI gating check. Tier 2 (LLM-based adversarial review) should still run for the deeper checks that grep can't reach.
 
 ## Requirements
 
-- bash 4+
-- `ripgrep` (`rg`) — preferred, falls back to `grep` if unavailable
-- `git` — required only for `--diff` mode
+- [Bun](https://bun.sh)
+- `git` — for `--diff` mode, and to honour `.gitignore` when scanning inside a repository
 
-No install step. Make the script executable and invoke directly.
+No install step and no other tools: file listing and pattern matching run in-process, so it behaves the same on Linux, macOS and Windows.
 
 ## Quick start
 
 ```bash
 # scan all test files in the current directory
-./check-test-quality.sh
+bun check-test-quality.ts
 
 # scan a specific path
-./check-test-quality.sh path/to/tests
+bun check-test-quality.ts path/to/tests
 
 # CI: only check files in the PR diff
-./check-test-quality.sh --diff origin/main..HEAD
+bun check-test-quality.ts --diff origin/main..HEAD
 
 # CI gating: fail the build on any HIGH-severity finding
-./check-test-quality.sh --diff origin/main..HEAD --strict
+bun check-test-quality.ts --diff origin/main..HEAD --strict
 
 # machine-readable output for CI tooling
-./check-test-quality.sh --json
+bun check-test-quality.ts --json
 ```
 
 ## Exit codes
@@ -129,12 +128,12 @@ The script automatically excludes test files inside common dependency and build 
 For recommended usage, point the script at a scoped path:
 
 ```bash
-./check-test-quality.sh src/tests           # scoped to test dir
-./check-test-quality.sh tests/              # scoped to test dir
-./check-test-quality.sh                     # current dir (excludes the common build dirs)
+bun check-test-quality.ts src/tests           # scoped to test dir
+bun check-test-quality.ts tests/              # scoped to test dir
+bun check-test-quality.ts                     # current dir (excludes the common build dirs)
 ```
 
-If you genuinely need to scan something inside `node_modules/`, edit `EXCLUDED_DIRS_REGEX` in the script or remove the exclusion filter.
+If you genuinely need to scan something inside `node_modules/`, edit `EXCLUDED_DIRECTORY_PATTERN` in the script or remove the exclusion filter.
 
 ## Flags
 
@@ -156,7 +155,7 @@ If you genuinely need to scan something inside `node_modules/`, edit `EXCLUDED_D
 - name: Test quality pre-screen
   run: |
     git fetch origin ${{ github.base_ref }}
-    ./scripts/check-test-quality.sh \
+    bun scripts/check-test-quality.ts \
       --diff origin/${{ github.base_ref }}..HEAD \
       --strict
 ```
@@ -167,7 +166,7 @@ If you genuinely need to scan something inside `node_modules/`, edit `EXCLUDED_D
 test-quality-screen:
   script:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - ./scripts/check-test-quality.sh \
+    - bun scripts/check-test-quality.ts \
         --diff "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD" \
         --strict
 ```
@@ -175,9 +174,9 @@ test-quality-screen:
 ### Pre-commit hook
 
 ```bash
-#!/usr/bin/env bash
+#!/bin/sh
 # .git/hooks/pre-commit
-./check-test-quality.sh --diff HEAD --strict
+bun path/to/check-test-quality.ts --diff HEAD --strict
 ```
 
 ## What this script deliberately does NOT do
@@ -204,6 +203,11 @@ For project-specific tuning, copy this script into your repo and edit the check 
 
 ## Version history
 
+- **0.2.0** — TypeScript port (`check-test-quality.ts`, run with Bun) for Linux, macOS and Windows; same checks, patterns, flags, output layout and exit codes. Compared against the bash v0.1.3 `rg` path on directory and `--diff` fixtures: identical findings except where listed here.
+  - **Fixed:** a check whose candidate files numbered exactly one reported the line number as the file and the line's text as the line (grep omits the file name for a single file; the bash version split its output on `:`). This hit `ts-suppression` with one `.ts` test file and `snapshot-auto-update` with only `package.json`, even in repositories with many tests, and produced invalid JSON.
+  - **Fixed:** hidden directories are scanned (except `.git`), so `.github/workflows/*.yml` is checked for `--update-snapshots`; the `rg` path never listed them.
+  - **Changed:** findings are in a stable order (files sorted, then line numbers); `rg` listed files in no fixed order.
+  - **Known, unchanged from 0.1.3:** `coverage-regression` matches unquoted keys only (`lines: 80`), so it never fires on `package.json` (`"lines": 80`); and the snapshot check counts only source changes inside the `__snapshots__` directory itself, so a snapshot updated alongside its source one level up is still flagged.
 - **0.1.3** — Default exclusion of `node_modules/`, `.git/`, `dist/`, `build/`, `coverage/`, `.next/`, `.nuxt/`, `.svelte-kit/`, `out/`, `target/`. `rg --files` respects gitignore in a git repo, but loses that protection outside one (e.g. `/tmp/bunx-*` extraction dirs). Naively scanning a project root would previously surface false-positive floods from upstream test suites (e.g. zod's tests use `@ts-ignore` normally). Belt-and-suspenders filter at the file-collection step.
 - **0.1.2** — UX fix: emit a stderr warning when zero test files matched the target (path typo, renamed directory, wrong glob). Same UX class as the v0.1.0 silent-exit bug — a CI job pointed at a missing path would otherwise report "clean" forever. Exit code stays 0 (legitimate zero-files case: `--diff` against a PR that didn't touch tests).
 - **0.1.1** — Bug fix: script silently exited 1 with zero output on suites with no findings. Caused by `[[ VERBOSE ]] && echo ... >&2` pattern at the top of check functions: when `VERBOSE=0`, the short-circuited expression returned exit 1, propagated through implicit `return` in `check_coverage_regression`'s early-return path, killed the script under `set -e`. Converted all conditional-echo patterns to `if/then/fi` form to prevent this and future regressions. Affects calibration: any audit that relied on "Tier 1 script returned clean" without explicit verbose output was actually reading a silent failure.

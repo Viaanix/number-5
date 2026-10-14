@@ -1,13 +1,6 @@
 ---
-name: test-quality-with-ai
-description: |
-  Self-contained guide to writing, reviewing, and maintaining high-quality tests with AI assistance.
-  Defends against two failure modes: fig-leaf tests (pass without verifying behavior) and evasion
-  (existing tests weakened to mask real bugs). Router skill — loads narrow workflow files by task
-  intent. Covers single-test writing, single-file review, suite-scale audit, failing-test response,
-  and framework-specific pitfalls for Vitest and bun:test.
-  Use when writing new tests, reviewing tests in a PR, auditing a test suite at scale, responding
-  to a failing test, or auditing existing tests for quality.
+name: j5-test-quality
+description: "Self-contained guide to writing, reviewing, and maintaining high-quality tests with AI assistance. Defends against two failure modes: fig-leaf tests (pass without verifying behavior) and evasion (existing tests weakened to mask real bugs). Router skill — loads narrow workflow files by task intent. Covers single-test writing, single-file review, suite-scale audit, failing-test response, and framework-specific pitfalls for Vitest and bun:test. Use when writing new tests, reviewing tests in a PR, auditing a test suite at scale, responding to a failing test, or auditing existing tests for quality."
 trigger_phrase:
   opus: "test quality writing reviewing"
   sonnet: "test quality writing reviewing vitest bun"
@@ -47,14 +40,14 @@ Each workflow loads the checklists and references it needs. The router itself do
 
 ## Bundled tooling
 
-This skill ships a grep-based Tier 1 pre-screen at `scripts/check-test-quality.sh`. It catches the deterministic fig-leaf signals (committed `.only`, `@ts-expect-error`, snapshot regenerations without inspection, empty catch blocks, weak assertions) without LLM analysis. The audit workflows reference it as their first step.
+This skill ships a pattern-based Tier 1 pre-screen at `scripts/check-test-quality.ts` (Bun; runs the same on Linux, macOS and Windows). It catches the deterministic fig-leaf signals (committed `.only`, `@ts-expect-error`, snapshot regenerations without inspection, empty catch blocks, weak assertions) without LLM analysis. The audit workflows reference it as their first step.
 
 See `scripts/README.md` for invocation, CI integration examples, and tuning guidance.
 
 ```bash
-./scripts/check-test-quality.sh                       # scan cwd
-./scripts/check-test-quality.sh --diff origin/main..HEAD --strict  # CI gating
-./scripts/check-test-quality.sh --json                # structured output
+bun scripts/check-test-quality.ts                     # scan cwd
+bun scripts/check-test-quality.ts --diff origin/main..HEAD --strict  # CI gating
+bun scripts/check-test-quality.ts --json              # structured output
 ```
 
 ## Conditional framework references
@@ -78,7 +71,7 @@ If this skill ever lifts into a dedicated test agent's system prompt, the agent 
 ## File structure
 
 ```
-test-quality-with-ai/
+j5-test-quality/
 ├── SKILL.md                              this file — router only
 ├── workflows/
 │   ├── generate.md                       writing a new test
@@ -94,6 +87,6 @@ test-quality-with-ai/
 │   ├── bun-test-patterns.md              bun:test-specific pitfalls
 │   └── assertion-shape.md                toMatchObject vs toEqual vs toStrictEqual
 └── scripts/
-    ├── check-test-quality.sh             Tier 1 grep pre-screen
+    ├── check-test-quality.ts             Tier 1 pre-screen (Bun)
     └── README.md                         script invocation + CI integration
 ```

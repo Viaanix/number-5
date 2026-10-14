@@ -23,7 +23,7 @@ The deliverable goes to a file (`.local/spikes/test-quality-audit.md` or similar
 Run the bundled script. Cheap, fast, catches deterministic signals.
 
 ```bash
-./scripts/check-test-quality.sh path/to/tests --json > /tmp/grep-findings.json
+bun scripts/check-test-quality.ts path/to/tests --json > grep-findings.json
 ```
 
 Read the output. Note the counts by severity. **The grep pass is calibration data, not the audit itself.** If `< 5` HIGH findings in 50+ files, evasion isn't the dominant failure mode for this codebase. If `> 20` HIGH findings in 50 files, evasion IS the dominant failure mode — focus the rest of the audit on those signals.
@@ -159,7 +159,7 @@ Skip files matching:
 - Tests of generated code (snapshots, codegen outputs)
 - Tests explicitly marked as integration / e2e where the audit lens differs
 
-Use the principles in test-quality-with-ai/SKILL.md and the patterns in
+Use the principles in j5-test-quality/SKILL.md and the patterns in
 checklists/fig-leaf-signals.md, checklists/mock-antipatterns.md, and (if
 loaded) references/assertion-shape.md.
 ```
@@ -249,4 +249,4 @@ work.
 - Mock-specific patterns: `checklists/mock-antipatterns.md`
 - Assertion permissiveness (contract libraries): `references/assertion-shape.md`
 - Framework-specific pitfalls: `references/vitest-patterns.md`, `references/bun-test-patterns.md`
-- Tier 1 grep script: `scripts/check-test-quality.sh`
+- Tier 1 grep script: `scripts/check-test-quality.ts`

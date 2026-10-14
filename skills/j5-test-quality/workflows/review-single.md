@@ -12,11 +12,11 @@ Run the bundled script first. It catches deterministic signals (`.only`, `@ts-ex
 
 ```bash
 # for a PR
-./scripts/check-test-quality.sh --diff origin/main..HEAD
+bun scripts/check-test-quality.ts --diff origin/main..HEAD
 
 # for a specific file or directory
-./scripts/check-test-quality.sh path/to/file.test.ts
-./scripts/check-test-quality.sh tests/
+bun scripts/check-test-quality.ts path/to/file.test.ts
+bun scripts/check-test-quality.ts tests/
 ```
 
 Address any HIGH-severity findings before continuing with the deeper review. They're cheap to fix and resolving them removes noise from the rest of the review.
@@ -168,4 +168,4 @@ When you encounter these, stop and reassess:
 - Larger audits: `workflows/review-at-scale.md`
 - Test failing during review: `workflows/maintain-failing.md`
 - Framework specifics: `references/vitest-patterns.md`, `references/bun-test-patterns.md`
-- Tier 1 grep script: `scripts/check-test-quality.sh`
+- Tier 1 grep script: `scripts/check-test-quality.ts`

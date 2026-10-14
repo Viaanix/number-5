@@ -103,6 +103,8 @@ ANTHROPIC_API_KEY=placeholder docker agent run issue-team/team.yaml --config-dir
 
 **Consequence:** the skill is never matched from its description. Agents that need it must name it explicitly. Write skill descriptions as one-line scalars.
 
+**Fix, verified:** a one-line, double-quoted `description: "..."` loads in full without the quotes (`docker agent debug skills` on `skills/j5-test-quality`, 2026-10-14). Quote it when the text contains `: `.
+
 ### Symlinked skill directories are skipped
 
 **Observed:** v1.145.0 source, commit 502549c (`pkg/skills/local.go`): the flat scan skips entries where `isSymlink` is true, and the recursive scan uses `filepath.WalkDir`, which does not follow links. Not yet exercised with a real symlink.

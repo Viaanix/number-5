@@ -6,7 +6,7 @@ A test exhibiting any of these may still be legitimate — context matters. Mult
 
 ## Tier 1 — script-detectable (grep)
 
-These are caught by `scripts/check-test-quality.sh` without LLM analysis. They're listed here for the agent's awareness and for use when the script isn't available.
+These are caught by `scripts/check-test-quality.ts` without LLM analysis. They're listed here for the agent's awareness and for use when the script isn't available.
 
 - [ ] **`.skip()` on test/it/describe** — disabled test in committed code. Must have tracking issue or be re-enabled.
 - [ ] **`.todo()` on test/it/describe** — unimplemented test. Should have tracking issue.
@@ -69,7 +69,7 @@ LOW findings are advisory — never gating, never sole basis for blocking a PR.
 
 ## Cross-references
 
-- `scripts/check-test-quality.sh` — automates the Tier 1 portion
+- `scripts/check-test-quality.ts` — automates the Tier 1 portion
 - `checklists/mock-antipatterns.md` — the five named mock anti-patterns in detail
 - `references/assertion-shape.md` — `toMatchObject` / `toEqual` / `toStrictEqual` choice
 - `workflows/review-single.md` — uses this checklist per file
