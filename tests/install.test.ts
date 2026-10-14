@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { quoteForPosixShell } from "../launcher/src/shell-quote.ts";
 import {
   BLOCK_BEGIN_MARKER,
   BLOCK_END_MARKER,
@@ -119,7 +120,7 @@ describe("runInstaller — install", () => {
     expect(lstatSync(sandbox.linkPath).isSymbolicLink()).toBe(true);
     expect(realpathSync.native(sandbox.linkPath)).toBe(realpathSync.native(sandbox.repositoryRoot));
     expect(readAliases(sandbox)).toBe(
-      `${USER_ALIAS_LINE}\n${BLOCK_BEGIN_MARKER}\nalias daw=${join(sandbox.linkPath, "bin", "daw")}\n${BLOCK_END_MARKER}\n`,
+      `${USER_ALIAS_LINE}\n${BLOCK_BEGIN_MARKER}\nalias daw=${quoteForPosixShell(join(sandbox.linkPath, "bin", "daw"))}\n${BLOCK_END_MARKER}\n`,
     );
   });
 
@@ -304,8 +305,10 @@ describe("chooseProfilePath", () => {
 
 describe("block text", () => {
   test("posix alias goes through the link to bin/daw", () => {
-    expect(buildBlockBody("zsh", "daw", "/home/me/docker-agent-workflows")).toBe(
-      "alias daw=/home/me/docker-agent-workflows/bin/daw",
+    // join() gives backslashes on Windows, which POSIX quoting then quotes.
+    const linkPath = join("home", "me", "docker-agent-workflows");
+    expect(buildBlockBody("zsh", "daw", linkPath)).toBe(
+      `alias daw=${quoteForPosixShell(join(linkPath, "bin", "daw"))}`,
     );
   });
 
