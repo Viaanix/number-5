@@ -63,6 +63,7 @@ describe.skipIf(process.platform === "win32")("quoteForPosixShell", () => {
 // runners for all three have it, so in CI a missing pwsh fails instead of skipping.
 const powerShellPath = Bun.which("pwsh");
 const powerShellRequired = process.env.CI === "true";
+const POWERSHELL_TEST_TIMEOUT_MILLISECONDS = 30_000;
 
 describe("quoteForPowerShell", () => {
   test("leaves flags and Windows paths unquoted", () => {
@@ -85,6 +86,8 @@ describe("quoteForPowerShell", () => {
         ),
       ).toEqual(AWKWARD_WORDS);
     },
+    // PowerShell's cold start took over 5 s (bun's default limit) on the Linux CI runner.
+    POWERSHELL_TEST_TIMEOUT_MILLISECONDS,
   );
 });
 
