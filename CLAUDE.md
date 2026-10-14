@@ -41,4 +41,4 @@ bun run validate:teams   # manifests, agents, configs, flavors, dry runs against
 
 ## Known state
 
-- `docker agent alias issue-team` points at a copy of `issue-team/` elsewhere (`~/dopamine911/repo/team`), byte-identical as of 2026-10-14 before this repo added `workflow.yaml`, the `low` flavor in `team.yaml`, and the shellcheck fix in `bin/issue-team-pr-threads`. Edits here do not reach that alias.
+- `docker agent alias issue-team` points at a copy of `issue-team/` elsewhere (`~/dopamine911/repo/team`), byte-identical as of 2026-10-14 before this repo added `workflow.yaml`, the `low` flavor, TypeScript helpers with sh/.cmd launchers and bare script-tool `cmd:` lines, and OS-neutral temp paths in the prompts. Edits here do not reach that alias.

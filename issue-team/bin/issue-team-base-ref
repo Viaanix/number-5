@@ -1,12 +1,4 @@
-#!/usr/bin/env bash
-# Print the remote default branch as a remote-tracking ref (e.g. origin/main).
-set -euo pipefail
-
-if ref=$(git symbolic-ref -q --short refs/remotes/origin/HEAD); then
-  echo "$ref"
-  exit 0
-fi
-
-# origin/HEAD is unset in some clones; ask GitHub instead.
-name=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
-echo "origin/$name"
+#!/bin/sh
+# issue-team-base-ref for Linux and macOS: runs helpers/base-ref.ts with Bun. The Windows
+# launcher is issue-team-base-ref.cmd; docker-agent's script tools call either by bare name.
+exec bun "$(dirname "$0")/../helpers/base-ref.ts" "$@"

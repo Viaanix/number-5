@@ -19,7 +19,7 @@ Every stage stops for your go-ahead before it publishes anything: push, PR creat
 | Runtime | docker-agent v1.145.0 (`docker agent`) | Docker CLI plugin |
 | Team config | Agents, models, shared toolsets, deny rules | `team.yaml` |
 | Prompts | One instruction file per agent | `instructions/*.md` |
-| Helpers | Deterministic scripts exposed to agents as tools, found on `PATH` | `bin/` |
+| Helpers | Deterministic Bun scripts exposed to agents as tools, launched from `PATH` by an `sh` launcher (Linux, macOS) or a `.cmd` (Windows) | `helpers/*.ts`, `bin/` |
 | Entry points | `work-issue`, `pr-followup`, `closeout` | `workflow.yaml` (for `daw`), `issue-team.sh` (shell functions) |
 | Effort levels | `low` flavor: haiku lead, sonnet review, builder effort low | `team.yaml` → `flavors` |
 | Builder | Claude Code harness (`claude` CLI, your Claude subscription login) | `harness: claude-code` |
@@ -40,13 +40,15 @@ Every stage stops for your go-ahead before it publishes anything: push, PR creat
 
 The reviewer cannot edit files or run the project; that is by design. Its verdicts are `Ship it`, `Approve-with-nits` and `Needs work`, and any blocker or load-bearing issue means `Needs work`, which sends the change back through at most two fix rounds.
 
-### Helper scripts (`bin/`)
+### Helper scripts (`helpers/`, launched from `bin/`)
 
 | Script | Used by | Output |
 |---|---|---|
 | `issue-team-base-ref` | everything | The remote default branch as `origin/<name>`, from `origin/HEAD` or, if unset, from GitHub |
-| `issue-team-change-diff [sha]` | reviewer (`change_diff` tool) | The branch's commits and full diff since the default branch, then uncommitted work. With a SHA, the commits after it first, as the review scope |
-| `issue-team-pr-threads <pr>` | followup, closeout (`pr_threads` tool) | One JSON object per unresolved review thread: id, path, line, outdated flag, comments |
+| `issue-team-change-diff [sha]` (or `since` in the environment) | reviewer (`change_diff` tool) | The branch's commits and full diff since the default branch, then uncommitted work. With a SHA, the commits after it first, as the review scope |
+| `issue-team-pr-threads <pr>` (or `pr` in the environment) | followup, closeout (`pr_threads` tool) | One JSON object per unresolved review thread: id, path, line, outdated flag, comments |
+
+Each helper is `helpers/<name>.ts` run by Bun; `bin/issue-team-<name>` (sh) and `bin/issue-team-<name>.cmd` start it. The script tools in `team.yaml` name them bare and pass their arguments as environment variables (as docker-agent does), so the same `cmd:` works under bash, zsh, PowerShell and cmd.exe.
 
 Nothing in this directory names an absolute path. `team.yaml` resolves `instructions/` relative to itself, `issue-team.sh` finds its own directory and puts `bin/` on `PATH`, and the script tools call the helpers by name. Clone it anywhere.
 
@@ -61,7 +63,7 @@ Nothing in this directory names an absolute path. `team.yaml` resolves `instruct
 1. Prerequisites: Docker with the `docker agent` plugin, `gh` (logged in), `claude` (logged in), `git`.
 2. The `test-quality-with-ai` skill at `~/.agents/skills/test-quality-with-ai/`. The tester and reviewer read its workflow files from that path.
 3. Anthropic API key for the native agents. `docker agent setup` → Anthropic, or set `ANTHROPIC_API_KEY` in `~/.config/cagent/.env`. The builder uses your Claude login instead.
-4. Shell functions and helpers, in `~/.bashrc` (use wherever you cloned this directory):
+4. Optional, bash and zsh only (`daw` replaces this on every OS): shell functions and helpers, in `~/.bashrc` (use wherever you cloned this directory):
    ```bash
    source ~/team/issue-team.sh
    ```

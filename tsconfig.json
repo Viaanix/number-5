@@ -15,5 +15,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["launcher", "scripts", "tests"]
+  "include": ["launcher", "scripts", "tests", "issue-team"]
 }

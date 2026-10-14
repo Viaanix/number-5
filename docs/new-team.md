@@ -9,7 +9,8 @@ my-team/
   team.yaml           docker-agent config: models, agents, toolsets, permissions, flavors
   workflow.yaml       launcher manifest: entry points, parameters, worktree mode, first message
   instructions/       one <agent>.md per agent (instruction_file)
-  bin/                deterministic helpers exposed as script tools; listed in workflow.yaml `path`
+  helpers/            deterministic Bun scripts exposed as script tools
+  bin/                one sh + one .cmd launcher per helper; listed in workflow.yaml `path`
   README.md           what it does, its agents, its limits
 ```
 
@@ -17,7 +18,7 @@ my-team/
 
 1. **Write `team.yaml`.** Start from the patterns in [docker-agent/patterns.md](docker-agent/patterns.md). Check it parses: `docker agent debug config my-team/team.yaml`.
 2. **Write `instructions/<agent>.md`** for each agent: the procedure, what every task message carries, the output format, and the rules (what it must never do).
-3. **Move anything deterministic into `bin/`** and expose it as a `type: script` tool. Name helpers `<team>-<verb>` so two teams' helpers never shadow each other on `PATH`. Start each with `#!/usr/bin/env bash` and `set -euo pipefail`; `bun run lint:shell` finds them by shebang.
+3. **Move anything deterministic into a helper** and expose it as a `type: script` tool with a bare `cmd:` (the helper reads its arguments from the environment). Write it as `helpers/<verb>.ts` and copy a launcher pair from `issue-team/bin/` as `bin/<team>-<verb>` and `bin/<team>-<verb>.cmd`. The `<team>-` prefix keeps two teams' helpers from shadowing each other on `PATH`. See [patterns](docker-agent/patterns.md#helpers-that-run-on-every-os).
 4. **Define effort levels** as `flavors:` if the team should have any. Keep each flavor to the keys it changes.
 5. **Write `workflow.yaml`** ([schema](launcher.md#the-manifest-teamworkflowyaml)) with one entry point per way of starting the team.
 6. **Check it:**

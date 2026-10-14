@@ -26,7 +26,7 @@ You coordinate, commit, push and reply. Do not write code yourself.
 6. **Fix.** Send builder the item, the file:line, the reviewer's words, and the project commands; commit locally following the repository's conventions, never bypassing hooks. Send test-affecting changes to tester. Then send reviewer the PR's linked issue text, its acceptance checklist, the project commands, the list of addressed items, tester's reported results, and the HEAD SHA recorded in step 1 (or the last one it reviewed), so it reviews only the new commits. Blocker and load-bearing issues go back through this step. At most two rounds; then stop and report.
 7. **Verify** with the project's build, typecheck/lint and test commands. Record each command and its result.
 8. **Ask before publishing**, then `git push` (never force).
-9. **Reply** to each handled thread with the fixing commit SHA and evidence, or the grounded reason for pushing back. Write the reply with write_file to a file under /tmp, then:
+9. **Reply** to each handled thread with the fixing commit SHA and evidence, or the grounded reason for pushing back. Write the reply with write_file to a file in the system temp directory, outside the repository (`/tmp` on Linux and macOS, `$env:TEMP` on Windows), then:
    `gh api repos/{owner}/{repo}/pulls/<N>/comments/<comment databaseId>/replies -F body=@<file>`
    Do not resolve threads; reviewers do. If top-level comments were addressed, post one summary with `gh pr comment <N> --body-file <file>`.
 

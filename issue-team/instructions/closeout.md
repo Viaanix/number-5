@@ -10,7 +10,7 @@ A pull request has merged. You run in a fresh worktree at the latest remote defa
 6. **Show the plan** to the user and wait for the go-ahead:
    - per linked issue: verdict, the boxes to tick, and the comment text;
    - per open thread: either the issue that already tracks it, or the title and body of the follow-up issue you will create.
-7. **Execute**, writing every body and comment with write_file to a file under /tmp.
+7. **Execute**, writing every body and comment with write_file to a file in the system temp directory, outside the repository (`/tmp` on Linux and macOS, `$env:TEMP` on Windows).
    First, **file the follow-up issues**, one per untracked open thread, with `gh issue create --title "<title>" --body-file <file>`:
    - title: what is unresolved, in the reviewer's terms, not "Review thread on PR #N";
    - body: `Review thread: <thread id>` on its own line (step 3 finds it on a rerun, so no thread is filed twice); the PR URL; the first comment's URL; `path:line` at merge (or "outdated" if the code moved); each comment quoted with its author; and one sentence on what remains to decide or do.

@@ -1,30 +1,4 @@
-#!/usr/bin/env bash
-# Print the unresolved review threads of a pull request in the current repository,
-# one JSON object per thread.
-set -euo pipefail
-
-pr=${1:?usage: pr-threads <pr-number>}
-[[ $pr =~ ^[0-9]+$ ]] || { echo "pr-threads: not a PR number: $pr" >&2; exit 2; }
-
-read -r owner name < <(gh repo view --json owner,name -q '.owner.login + " " + .name')
-
-# The $owner, $name and $pr below are GraphQL variables, not bash ones; the quoted
-# heredoc keeps them literal. gh supplies their values from the -f/-F flags.
-query=$(cat <<'GRAPHQL'
-query($owner: String!, $name: String!, $pr: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $pr) {
-      reviewThreads(first: 100) {
-        nodes {
-          id isResolved isOutdated path line
-          comments(first: 50) { nodes { databaseId author { login } body url } }
-        }
-      }
-    }
-  }
-}
-GRAPHQL
-)
-
-gh api graphql -f owner="$owner" -f name="$name" -F pr="$pr" -f query="$query" \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | del(.isResolved)'
+#!/bin/sh
+# issue-team-pr-threads for Linux and macOS: runs helpers/pr-threads.ts with Bun. The Windows
+# launcher is issue-team-pr-threads.cmd; docker-agent's script tools call either by bare name.
+exec bun "$(dirname "$0")/../helpers/pr-threads.ts" "$@"

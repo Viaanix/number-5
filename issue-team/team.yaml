@@ -18,7 +18,9 @@ toolsets:
     type: script
     shell:
       pr_threads:
-        cmd: issue-team-pr-threads "$pr"
+        # Bare name: the pr argument reaches the helper as an environment variable, which
+        # it reads itself, so the line works in bash, zsh, PowerShell and cmd.exe alike.
+        cmd: issue-team-pr-threads
         description: Unresolved review threads on a pull request, one JSON object per thread (thread id, path, line, outdated flag, comments with databaseId, author, body, url).
         args:
           pr:
@@ -69,7 +71,8 @@ agents:
       - type: script
         shell:
           change_diff:
-            cmd: issue-team-change-diff "$since"
+            # Bare name; the helper reads `since` from its environment (see pr_threads).
+            cmd: issue-team-change-diff
             description: The branch's change since it left the remote default branch, followed by any uncommitted or untracked work. With `since` (a commit SHA you were given as last reviewed), the commits added after it come first, as the scope of this review.
             args:
               since:

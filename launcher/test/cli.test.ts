@@ -3,7 +3,7 @@
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
@@ -17,6 +17,7 @@ import {
   FIXTURE_DEFAULT_BRANCH,
   FIXTURE_FEATURE_BRANCH,
   removeTemporaryDirectories,
+  writeFakeCommand,
 } from "./fixtures.ts";
 
 afterAll(removeTemporaryDirectories);
@@ -243,13 +244,11 @@ describe("daw launching", () => {
   test("runs docker in the project with the team's bin first on PATH and returns its exit code", () => {
     const { projectRoot } = createFixtureProject("launch-app");
     const fakeBinDirectory = createTemporaryDirectory();
-    const fakeDockerScript = join(import.meta.dir, "fixtures", "fake-docker.ts");
-    // A launcher per OS for the same Bun script: `docker` for POSIX shells and exec,
-    // `docker.cmd` for Windows, where PATHEXT resolution finds it.
-    const posixLauncherPath = join(fakeBinDirectory, "docker");
-    writeFileSync(posixLauncherPath, `#!/bin/sh\nexec bun "${fakeDockerScript}" "$@"\n`);
-    chmodSync(posixLauncherPath, 0o755);
-    writeFileSync(join(fakeBinDirectory, "docker.cmd"), `@bun "${fakeDockerScript}" %*\r\n`);
+    writeFakeCommand(
+      fakeBinDirectory,
+      "docker",
+      join(import.meta.dir, "fixtures", "fake-docker.ts"),
+    );
 
     // Started from an unrelated directory, so the working-directory check proves the
     // launcher moved into the project rather than inheriting the caller's directory.
