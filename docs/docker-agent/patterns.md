@@ -63,4 +63,4 @@ Each entry point that changes code runs in its own worktree beside the user's ch
 ## Effort
 
 ### Effort is a flavor
-A team defines its effort levels as `flavors:` in `team.yaml` — a lower `harness.effort` for harness agents, cheaper models for native ones — and `j5 --effort <flavor>` selects one. No flavor means the file as written. Keep each flavor minimal (flavors deep-merge) and let `validate:teams` prove it changes something.
+A team defines its effort levels as `flavors:` in `team.yaml` — a lower `harness.effort` and a cheaper `harness.model` for harness agents, cheaper models for native ones — and `j5 --effort <flavor>` selects one. No flavor means the file as written. Keep each flavor minimal (flavors deep-merge) and let `validate:teams` prove it changes something.

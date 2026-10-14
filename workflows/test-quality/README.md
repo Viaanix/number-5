@@ -30,7 +30,7 @@ docker-agent gives a harness agent nothing but its task message: instruction fil
 | Piece | Where |
 |---|---|
 | Each agent's whole prompt | its entry point's `message` in `workflow.yaml` (`{target}` / `{test}` are parameters; `{{` `}}` are literal braces) |
-| Agents and effort levels | `team.yaml`: four `harness: claude-code` agents at effort `high`; the `low` flavor sets all four to `low` |
+| Agents, models and effort levels | `team.yaml`: four `harness: claude-code` agents at effort `high`, `auditor` and `reviewer` on Opus 5.5, `writer` and `fixer` on Sonnet 5.5 (`harness.model`); the `low` flavor steps each down a tier (Sonnet / Haiku 4.5) at effort `low` |
 | The skill | read by path from `~/.agents/skills/j5-test-quality/` (installed by `bun scripts/install.ts`); it is not one of Claude Code's skills, and the prompts say not to use the older `test-quality-with-ai` |
 | Deterministic steps | helpers in `bin/` that the prompts run by bare name through Claude Code's shell; `j5` puts `bin/` on `PATH` |
 
