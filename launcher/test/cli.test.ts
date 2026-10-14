@@ -8,6 +8,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "../src/arguments.ts";
+import { formatBanner } from "../src/banner.ts";
 import { formatUsage } from "../src/cli.ts";
 import { readPathValue, withPathValue } from "../src/environment.ts";
 import { loadManifest } from "../src/manifest.ts";
@@ -624,8 +625,8 @@ describe("j5 list and help", () => {
     expect(result.standardOutput).toContain("\n  review-branch\n");
   });
 
-  test("help opens with the greeting, then the usage", () => {
-    expect(formatUsage()).toStartWith("j5 — Number 5 is alive.\n\nUsage:\n");
+  test("help opens with the banner, then the usage", () => {
+    expect(formatUsage()).toStartWith(`${formatBanner()}\n\nUsage:\n`);
   });
 
   test("help documents every launcher flag", () => {

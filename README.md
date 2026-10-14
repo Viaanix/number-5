@@ -1,3 +1,5 @@
+![number-5: a robot at a workbench, a pipeline from Issue to Agent, Plan, Code, PR and Merge, and the words "Need input."](docs/assets/number-5-banner.jpg)
+
 # number-5
 
 *Need input.*
