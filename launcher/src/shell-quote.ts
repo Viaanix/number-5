@@ -1,14 +1,28 @@
-// Renders a launch plan as one bash command line, so `daw --print` output can be
-// read, pasted into a terminal, and compared exactly in tests.
+// Renders a launch plan as one command line in the user's shell, so `daw --print`
+// output can be read, pasted into a terminal, and compared exactly in tests.
+// POSIX shells (bash, zsh) on Linux and macOS; PowerShell on Windows.
 
 import type { LaunchPlan } from "./plan.ts";
 
-// Words made only of these characters mean the same thing quoted or unquoted in bash.
-const SHELL_SAFE_WORD_PATTERN = /^[A-Za-z0-9_/.=:,@+%-]+$/;
+/** The shell syntax a command line is written in. */
+export type ShellDialect = "posix" | "powershell";
 
-/** Quotes one word for bash; safe words are returned unchanged. */
-export function quoteForShell(word: string): string {
-  if (SHELL_SAFE_WORD_PATTERN.test(word)) {
+// Words made only of these characters mean the same thing quoted or unquoted in bash/zsh.
+const POSIX_SAFE_WORD_PATTERN = /^[A-Za-z0-9_/.=:,@+%-]+$/;
+
+// PowerShell gives meaning to more characters in bare arguments than bash does:
+// `,` builds an array, a leading `@` splats, `%` and `$` are special. Keep bare words
+// to a set PowerShell passes through unchanged, including Windows path backslashes.
+const POWERSHELL_SAFE_WORD_PATTERN = /^[A-Za-z0-9_/\\.=:+-]+$/;
+
+/** Returns the dialect `--print` uses on the given platform (process.platform). */
+export function shellDialectForPlatform(platform: NodeJS.Platform): ShellDialect {
+  return platform === "win32" ? "powershell" : "posix";
+}
+
+/** Quotes one word for bash/zsh; safe words are returned unchanged. */
+export function quoteForPosixShell(word: string): string {
+  if (POSIX_SAFE_WORD_PATTERN.test(word)) {
     return word;
   }
   // Inside single quotes nothing is special except the closing quote itself,
@@ -16,17 +30,43 @@ export function quoteForShell(word: string): string {
   return `'${word.replaceAll("'", "'\\''")}'`;
 }
 
+/** Quotes one word for PowerShell; safe words are returned unchanged. */
+export function quoteForPowerShell(word: string): string {
+  if (POWERSHELL_SAFE_WORD_PATTERN.test(word)) {
+    return word;
+  }
+  // In a PowerShell single-quoted string nothing is expanded; a literal ' is written ''.
+  return `'${word.replaceAll("'", "''")}'`;
+}
+
 /**
- * Renders the plan as `cd <dir> && PATH=<dirs>:"$PATH" docker agent run ...`.
+ * Renders the plan as one command line:
+ * - posix:      `cd <dir> && PATH=<dirs>:"$PATH" docker agent run ...`
+ * - powershell: `Set-Location -LiteralPath <dir>; $env:Path = '<dirs>;' + $env:Path; docker agent run ...`
  * The team's helper directories are shown without the inherited PATH, which would
  * only add noise and machine-specific paths.
  */
-export function renderPlanAsShellCommand(plan: LaunchPlan, teamPathDirectories: string[]): string {
-  const commandText = plan.commandWords.map(quoteForShell).join(" ");
-  const changeDirectory = `cd ${quoteForShell(plan.workingDirectory)}`;
+export function renderPlanAsShellCommand(
+  plan: LaunchPlan,
+  teamPathDirectories: string[],
+  dialect: ShellDialect,
+): string {
+  if (dialect === "powershell") {
+    // `&` invokes the command name as a command even when it is quoted.
+    const commandText = `& ${plan.commandWords.map(quoteForPowerShell).join(" ")}`;
+    const changeDirectory = `Set-Location -LiteralPath ${quoteForPowerShell(plan.workingDirectory)}`;
+    if (teamPathDirectories.length === 0) {
+      return `${changeDirectory}; ${commandText}`;
+    }
+    const prependedPath = quoteForPowerShell(`${teamPathDirectories.join(";")};`);
+    return `${changeDirectory}; $env:Path = ${prependedPath} + $env:Path; ${commandText}`;
+  }
+
+  const commandText = plan.commandWords.map(quoteForPosixShell).join(" ");
+  const changeDirectory = `cd ${quoteForPosixShell(plan.workingDirectory)}`;
   if (teamPathDirectories.length === 0) {
     return `${changeDirectory} && ${commandText}`;
   }
-  const prependedPath = teamPathDirectories.map(quoteForShell).join(":");
+  const prependedPath = teamPathDirectories.map(quoteForPosixShell).join(":");
   return `${changeDirectory} && PATH=${prependedPath}:"$PATH" ${commandText}`;
 }

@@ -18,7 +18,7 @@ You coordinate, commit, and publish. Do not write production code or tests yours
 7. **Fix loop.** Blocker and load-bearing issues from reviewer, and production defects from tester, go back to builder (production code) or tester (tests); then commit and re-run tester. Re-run reviewer with the same inputs plus the last reviewed HEAD SHA, so it reviews the new commits. Repeat until the verdict is Ship it or Approve-with-nits, at most two fix rounds; after that stop and report the open issues to the user.
 8. **Verify** yourself: run the project's build, typecheck/lint and test commands on the committed branch with a clean `git status`. Record each command and its result (pass/fail counts).
 9. **Ask before publishing.** Show the user: changed files, verification results, the reviewer's verdict and any soft nits left, and the proposed PR title and body. Wait for the go-ahead.
-10. **Publish.** `git push -u origin HEAD`. Write the PR body with write_file to a file under /tmp (never inside the repository), then `gh pr create --title "<title>" --body-file <file>`. The body contains `Closes #<N>`, what changed and why, and the verification results from step 8. Report the PR URL.
+10. **Publish.** `git push -u origin HEAD`. Write the PR body with write_file to a file in the system temp directory, outside the repository (`/tmp` on Linux and macOS, `$env:TEMP` on Windows), then `gh pr create --title "<title>" --body-file <file>`. The body contains `Closes #<N>`, what changed and why, and the verification results from step 8. Report the PR URL.
 
 ## Rules
 

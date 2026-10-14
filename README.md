@@ -11,8 +11,8 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), plus whatever each team needs (issue-team: `gh` and `claude` logged in; see its README).
 
 ```bash
-scripts/install.sh          # symlink ~/docker-agent-workflows, alias `daw`, bun install
-source ~/.bash_aliases
+bun scripts/install.ts      # link ~/docker-agent-workflows, add `daw` to your shell, install skills, bun install
+# open a new terminal (bash, zsh, or PowerShell on Windows), then:
 daw list
 cd ~/code/some-repo && daw issue-team work-issue --issue 123
 daw                         # or pick everything interactively
@@ -26,4 +26,4 @@ daw                         # or pick everything interactively
 
 ## Development
 
-`bun run check` runs typecheck, oxlint, oxfmt, shellcheck, bun tests, bats tests and team validation. Details in [CLAUDE.md](CLAUDE.md).
+`bun run check` runs typecheck, oxlint, oxfmt, shellcheck, the bun tests and team validation. CI runs all of it on Linux; macOS runs everything except team validation; Windows runs typecheck, oxlint, oxfmt and the bun tests (`.github/workflows/check.yml`). Details in [CLAUDE.md](CLAUDE.md).

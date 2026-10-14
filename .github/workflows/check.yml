@@ -1,0 +1,107 @@
+# Runs the repository's checks on every supported operating system.
+# Linux runs the full `bun run check`, including validate:teams against a real
+# docker-agent. macOS runs each check as its own step and keeps going after a
+# failure, so one run shows everything that breaks there.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.4.2"
+  # Must match the version the docs and gotchas were verified against.
+  DOCKER_AGENT_VERSION: "v1.145.0"
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install docker-agent as a Docker CLI plugin
+        run: |
+          mkdir -p "$HOME/.docker/cli-plugins"
+          curl -fsSL -o "$HOME/.docker/cli-plugins/docker-agent" \
+            "https://github.com/docker/docker-agent/releases/download/${DOCKER_AGENT_VERSION}/docker-agent-linux-amd64"
+          chmod +x "$HOME/.docker/cli-plugins/docker-agent"
+          docker agent version
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+        env:
+          # docker-agent requires the variable to be set even for --dry-run, which
+          # calls no model; validate:teams only dry-runs. Not a secret.
+          ANTHROPIC_API_KEY: placeholder-dry-run-calls-no-model
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install shellcheck
+        run: brew install shellcheck
+      - name: Report shells
+        run: |
+          echo "SHELL=$SHELL"
+          /bin/bash --version | head -1
+          bash --version | head -1
+      - run: bun install --frozen-lockfile
+      - name: typecheck
+        if: ${{ !cancelled() }}
+        run: bun run typecheck
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: bun run lint
+      - name: format:check
+        if: ${{ !cancelled() }}
+        run: bun run format:check
+      - name: lint:shell
+        if: ${{ !cancelled() }}
+        run: bun run lint:shell
+      - name: test
+        if: ${{ !cancelled() }}
+        run: bun run test
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        # PowerShell, the default shell docker-agent picks on Windows.
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Report environment
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          git config --get core.autocrlf
+          Get-Command bash, sh, git, gh -ErrorAction SilentlyContinue | Format-Table Name, Source -AutoSize
+      - run: bun install --frozen-lockfile
+      - name: typecheck
+        if: ${{ !cancelled() }}
+        run: bun run typecheck
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: bun run lint
+      - name: format:check
+        if: ${{ !cancelled() }}
+        run: bun run format:check
+      - name: test
+        if: ${{ !cancelled() }}
+        run: bun run test

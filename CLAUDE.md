@@ -9,9 +9,10 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 | `<team>/` | One team per top-level directory: `team.yaml` (docker-agent), `workflow.yaml` (launcher manifest), `instructions/`, `bin/`. `issue-team/` is the reference team |
 | `launcher/src/` | The `daw` CLI (Bun + TypeScript). `cli.ts` is the entry; `plan.ts` builds the docker-agent command and has no side effects |
 | `launcher/test/` | bun:test tests; real temporary git repositories, no module mocks |
+| `skills/` | Agent skills shipped with the teams (`j5-test-quality`); the installer copies them to `~/.agents/skills/` |
 | `bin/daw` | Shim the alias points at |
-| `scripts/` | `install.sh` (symlink + alias), `lint-shell.sh`, `validate-teams.ts` |
-| `tests/` | bats tests for the shell scripts |
+| `scripts/` | `install.ts` (link + shell alias/function, all OSes), `lint-shell.sh`, `validate-teams.ts` |
+| `tests/` | bun:test tests for `scripts/` |
 | `docs/` | docker-agent knowledge (reference, patterns, gotchas), launcher and new-team guides |
 
 ## Verification
@@ -22,9 +23,8 @@ bun run check        # everything below, in order; must exit 0
 bun run typecheck    # tsc --noEmit
 bun run lint         # oxlint --deny-warnings (.oxlintrc.json), type-aware via oxlint-tsgolint; lint:fix applies fixes and formats
 bun run format:check # oxfmt --check (.oxfmtrc.json); `bun run format` writes
-bun run lint:shell   # shellcheck on every shell script, found by shebang and *.sh / *.bats
-bun run test         # bun test (launcher)
-bun run test:shell   # bats tests
+bun run lint:shell   # shellcheck on every shell script, found by shebang and *.sh (Linux/macOS)
+bun run test         # bun test --timeout=30000 (launcher; spawn-heavy tests take seconds on Windows)
 bun run validate:teams   # manifests, agents, configs, flavors, dry runs against the installed docker-agent
 ```
 
@@ -42,4 +42,4 @@ bun run validate:teams   # manifests, agents, configs, flavors, dry runs against
 
 ## Known state
 
-- `docker agent alias issue-team` points at a copy of `issue-team/` elsewhere (`~/dopamine911/repo/team`), byte-identical as of 2026-10-14 before this repo added `workflow.yaml`, the `low` flavor in `team.yaml`, and the shellcheck fix in `bin/issue-team-pr-threads`. Edits here do not reach that alias.
+- `docker agent alias issue-team` points at a copy of `issue-team/` elsewhere (`~/dopamine911/repo/team`), byte-identical as of 2026-10-14 before this repo added `workflow.yaml`, the `low` flavor, TypeScript helpers with sh/.cmd launchers and bare script-tool `cmd:` lines, and OS-neutral temp paths in the prompts. Edits here do not reach that alias.

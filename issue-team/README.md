@@ -19,12 +19,12 @@ Every stage stops for your go-ahead before it publishes anything: push, PR creat
 | Runtime | docker-agent v1.145.0 (`docker agent`) | Docker CLI plugin |
 | Team config | Agents, models, shared toolsets, deny rules | `team.yaml` |
 | Prompts | One instruction file per agent | `instructions/*.md` |
-| Helpers | Deterministic scripts exposed to agents as tools, found on `PATH` | `bin/` |
+| Helpers | Deterministic Bun scripts exposed to agents as tools, launched from `PATH` by an `sh` launcher (Linux, macOS) or a `.cmd` (Windows) | `helpers/*.ts`, `bin/` |
 | Entry points | `work-issue`, `pr-followup`, `closeout` | `workflow.yaml` (for `daw`), `issue-team.sh` (shell functions) |
 | Effort levels | `low` flavor: haiku lead, sonnet review, builder effort low | `team.yaml` → `flavors` |
 | Builder | Claude Code harness (`claude` CLI, your Claude subscription login) | `harness: claude-code` |
 | Models | `lead` = `anthropic/claude-sonnet-5`, `review` = `anthropic/claude-opus-5` | `team.yaml` → `models` |
-| Test discipline | `test-quality-with-ai` skill | `~/.agents/skills/test-quality-with-ai` |
+| Test discipline | `j5-test-quality` skill and its `test_prescreen` tool | `skills/j5-test-quality` in this repository, installed to `~/.agents/skills/j5-test-quality` |
 | GitHub | `gh` CLI (issues, PRs, checks, GraphQL for review threads) | `PATH` |
 
 ### Agents
@@ -40,13 +40,15 @@ Every stage stops for your go-ahead before it publishes anything: push, PR creat
 
 The reviewer cannot edit files or run the project; that is by design. Its verdicts are `Ship it`, `Approve-with-nits` and `Needs work`, and any blocker or load-bearing issue means `Needs work`, which sends the change back through at most two fix rounds.
 
-### Helper scripts (`bin/`)
+### Helper scripts (`helpers/`, launched from `bin/`)
 
 | Script | Used by | Output |
 |---|---|---|
 | `issue-team-base-ref` | everything | The remote default branch as `origin/<name>`, from `origin/HEAD` or, if unset, from GitHub |
-| `issue-team-change-diff [sha]` | reviewer (`change_diff` tool) | The branch's commits and full diff since the default branch, then uncommitted work. With a SHA, the commits after it first, as the review scope |
-| `issue-team-pr-threads <pr>` | followup, closeout (`pr_threads` tool) | One JSON object per unresolved review thread: id, path, line, outdated flag, comments |
+| `issue-team-change-diff [sha]` (or `since` in the environment) | reviewer (`change_diff` tool) | The branch's commits and full diff since the default branch, then uncommitted work. With a SHA, the commits after it first, as the review scope |
+| `issue-team-pr-threads <pr>` (or `pr` in the environment) | followup, closeout (`pr_threads` tool) | One JSON object per unresolved review thread: id, path, line, outdated flag, comments |
+
+Each helper is `helpers/<name>.ts` run by Bun; `bin/issue-team-<name>` (sh) and `bin/issue-team-<name>.cmd` start it. The script tools in `team.yaml` name them bare and pass their arguments as environment variables (as docker-agent does), so the same `cmd:` works under bash, zsh, PowerShell and cmd.exe.
 
 Nothing in this directory names an absolute path. `team.yaml` resolves `instructions/` relative to itself, `issue-team.sh` finds its own directory and puts `bin/` on `PATH`, and the script tools call the helpers by name. Clone it anywhere.
 
@@ -58,10 +60,10 @@ Nothing in this directory names an absolute path. `team.yaml` resolves `instruct
 
 ## Setup
 
-1. Prerequisites: Docker with the `docker agent` plugin, `gh` (logged in), `claude` (logged in), `git`.
-2. The `test-quality-with-ai` skill at `~/.agents/skills/test-quality-with-ai/`. The tester and reviewer read its workflow files from that path.
+1. Prerequisites: Docker with the `docker agent` plugin, `gh` (logged in), `claude` (logged in), `git`, and [Bun](https://bun.sh): the helpers in `bin/` run with it whenever an agent calls a tool.
+2. The `j5-test-quality` skill at `~/.agents/skills/j5-test-quality/`, which `bun scripts/install.ts` copies there from `skills/`. The tester and reviewer read its workflow files from that path; the tester's `test_prescreen` tool runs the repository's own copy of its pre-screen.
 3. Anthropic API key for the native agents. `docker agent setup` → Anthropic, or set `ANTHROPIC_API_KEY` in `~/.config/cagent/.env`. The builder uses your Claude login instead.
-4. Shell functions and helpers, in `~/.bashrc` (use wherever you cloned this directory):
+4. Optional, bash and zsh only (`daw` replaces this on every OS): shell functions and helpers, in `~/.bashrc` (use wherever you cloned this directory):
    ```bash
    source ~/team/issue-team.sh
    ```
@@ -74,7 +76,7 @@ Nothing in this directory names an absolute path. `team.yaml` resolves `instruct
    ```bash
    docker agent doctor issue-team          # credentials, Claude Code login
    docker agent debug toolsets issue-team  # tools each agent gets
-   docker agent debug skills issue-team    # tester and reviewer see test-quality-with-ai
+   docker agent debug skills issue-team    # tester and reviewer see j5-test-quality
    ```
 
 ## Commands
@@ -178,7 +180,6 @@ Options given on the command line win over an alias's options.
 
 ## Known limits
 
-- **Skill description**: docker-agent parses skill frontmatter line by line, so `test-quality-with-ai`'s `description: |` loads as `|` and the skill is never matched automatically. The tester and reviewer name it explicitly, so it still loads.
-- **Skill files**: local skills get no `read_skill_file` tool, so the instructions point at `~/.agents/skills/test-quality-with-ai/` directly. The skill must be installed there, not in `~/.claude/skills` or `~/.codex/skills`.
+- **Skill files**: local skills get no `read_skill_file` tool (verified, see `docs/docker-agent/gotchas.md`), so the instructions point at `~/.agents/skills/j5-test-quality/` directly. The skill must be installed there, not in `~/.claude/skills` or `~/.codex/skills`.
 - **Docs vs. version**: docker.github.io tracks `main` and documents flags v1.145.0 lacks (`--last`). Check `docker agent run --help`.
 - **Duplicate follow-up issues**: closeout finds existing follow-ups by searching for the thread id; GitHub search can lag a newly created issue, so a rerun seconds later may file a duplicate.

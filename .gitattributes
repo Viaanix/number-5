@@ -1,0 +1,9 @@
+# Check out every text file with LF, on every OS. Without this, Git for Windows
+# (core.autocrlf=true by default) converts to CRLF: oxfmt --check then flags every
+# file, and shell scripts with CRLF fail under Git Bash ("$'\r': command not found").
+* text=auto eol=lf
+
+# cmd.exe parses batch files line by line and misreads labels and some commands in
+# LF-only files; keep Windows launchers in CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf

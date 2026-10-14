@@ -26,7 +26,7 @@ describe("resolveGitToplevel", () => {
     const { projectRoot } = createFixtureProject("toplevel-app");
     const subdirectory = join(projectRoot, "src", "deep");
     mkdirSync(subdirectory, { recursive: true });
-    expect(resolveGitToplevel(subdirectory)).toBe(realpathSync(projectRoot));
+    expect(resolveGitToplevel(subdirectory)).toBe(realpathSync.native(projectRoot));
   });
 
   test("rejects a directory outside any repository", () => {

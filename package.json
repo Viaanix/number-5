@@ -9,10 +9,9 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint:shell": "bash scripts/lint-shell.sh",
-    "test": "bun test",
-    "test:shell": "bats tests",
+    "test": "bun test --timeout=30000",
     "validate:teams": "bun scripts/validate-teams.ts",
-    "check": "bun run typecheck && bun run lint && bun run format:check && bun run lint:shell && bun run test && bun run test:shell && bun run validate:teams"
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run lint:shell && bun run test && bun run validate:teams"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",

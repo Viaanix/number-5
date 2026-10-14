@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Entry point for the docker-agent-workflows launcher (launcher/src/cli.ts).
-# Usually reached through the `daw` alias that scripts/install.sh adds, via a symlink
+# Usually reached through the `daw` alias that scripts/install.ts adds, via a symlink
 # to this repository in your home directory; the real path is resolved first so the
 # launcher finds its teams wherever the repository is cloned.
 set -euo pipefail

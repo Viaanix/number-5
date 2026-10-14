@@ -10,6 +10,7 @@
 import { basename, resolve } from "node:path";
 
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
+import { readPathValue, withPathValue } from "./environment.ts";
 import {
   inspectPullRequestWorktree,
   listRemoteBranches,
@@ -28,7 +29,7 @@ import {
   LaunchCancelledError,
   showNote,
 } from "./prompts.ts";
-import { renderPlanAsShellCommand } from "./shell-quote.ts";
+import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
 import { discoverTeams } from "./teams.ts";
 
@@ -188,21 +189,21 @@ async function chooseProjectRoot(
     }
     return resolveGitToplevel(resolve(requestedProjectPath));
   }
+  // Run from inside a checkout (any subdirectory), the project is that repository and
+  // nobody is asked. The resolved path still shows in the `cd ...` of the command the
+  // launcher prints or confirms, so a wrong guess is visible before anything runs.
   const currentDirectory = process.cwd();
-  const currentDirectoryIsProject = describeProjectPathProblem(currentDirectory) === undefined;
-  if (!interaction.canPrompt) {
-    if (!currentDirectoryIsProject) {
-      throw new UsageError(
-        "the current directory is not a git repository; pass --project <path> or cd into one",
-      );
-    }
+  if (describeProjectPathProblem(currentDirectory) === undefined) {
     return resolveGitToplevel(currentDirectory);
   }
+  if (!interaction.canPrompt) {
+    throw new UsageError(
+      "the current directory is not a git repository; pass --project <path> or cd into one",
+    );
+  }
   interaction.askedAnything = true;
-  const answer = await askForText(
-    "Project checkout (path to a git repository)",
-    (projectPath) => describeProjectPathProblem(projectPath),
-    currentDirectoryIsProject ? resolveGitToplevel(currentDirectory) : undefined,
+  const answer = await askForText("Project checkout (path to a git repository)", (projectPath) =>
+    describeProjectPathProblem(projectPath),
   );
   return resolveGitToplevel(resolve(answer));
 }
@@ -287,11 +288,24 @@ async function collectParameterValues(
 }
 
 async function runPlan(plan: LaunchPlan): Promise<number> {
+  const [commandName, ...commandArguments] = plan.commandWords;
+  if (commandName === undefined) {
+    throw new Error("the launch plan has no command");
+  }
+  // Resolve the executable against the PATH the child will get, including Windows
+  // PATHEXT lookup (docker → docker.exe), so a missing docker is reported by name
+  // instead of as a spawn error.
+  const executablePath = Bun.which(commandName, { PATH: plan.pathEnvironment });
+  if (executablePath === null) {
+    throw new Error(
+      `'${commandName}' was not found on PATH; is Docker with the docker agent plugin installed?`,
+    );
+  }
   let childProcess: Bun.Subprocess;
   try {
-    childProcess = Bun.spawn(plan.commandWords, {
+    childProcess = Bun.spawn([executablePath, ...commandArguments], {
       cwd: plan.workingDirectory,
-      env: { ...process.env, PATH: plan.pathEnvironment },
+      env: withPathValue(process.env, plan.pathEnvironment),
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
@@ -384,9 +398,13 @@ async function launch(
     baseRef,
     pullRequestWorktree,
     passthroughArguments: parsedArguments.passthroughArguments,
-    inheritedPath: process.env.PATH ?? "",
+    inheritedPath: readPathValue(process.env),
   });
-  const commandLine = renderPlanAsShellCommand(plan, team.pathDirectories);
+  const commandLine = renderPlanAsShellCommand(
+    plan,
+    team.pathDirectories,
+    shellDialectForPlatform(process.platform),
+  );
 
   if (parsedArguments.switches.has("print")) {
     console.log(commandLine);

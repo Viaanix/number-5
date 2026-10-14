@@ -15,6 +15,7 @@
 import { delimiter, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
+import { readPathValue, withPathValue } from "../launcher/src/environment.ts";
 import type { WorkflowManifest } from "../launcher/src/manifest.ts";
 import { readTeamConfigSummary } from "../launcher/src/team-config.ts";
 import { discoverTeams } from "../launcher/src/teams.ts";
@@ -33,10 +34,10 @@ function runDockerAgent(dockerAgentArguments: string[], team: WorkflowManifest):
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
-    env: {
-      ...process.env,
-      PATH: [...team.pathDirectories, process.env.PATH ?? ""].join(delimiter),
-    },
+    env: withPathValue(
+      process.env,
+      [...team.pathDirectories, readPathValue(process.env)].join(delimiter),
+    ),
   });
   return {
     exitCode: completedProcess.exitCode,

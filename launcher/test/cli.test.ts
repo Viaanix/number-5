@@ -2,18 +2,22 @@
 // stdin is a pipe, so the launcher never prompts: every missing value is an error.
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
-import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, realpathSync } from "node:fs";
+import { delimiter, join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "../src/arguments.ts";
 import { formatUsage } from "../src/cli.ts";
+import { readPathValue, withPathValue } from "../src/environment.ts";
+import { quoteForPosixShell, quoteForPowerShell } from "../src/shell-quote.ts";
 import {
   createFixtureProject,
   createTemporaryDirectory,
   FIXTURE_DEFAULT_BRANCH,
   FIXTURE_FEATURE_BRANCH,
   removeTemporaryDirectories,
+  writeFakeCommand,
 } from "./fixtures.ts";
 
 afterAll(removeTemporaryDirectories);
@@ -28,19 +32,41 @@ const EXIT_CODE_USAGE = 2;
 // A PR number no real ~/.cagent/worktrees/pr-<n> will have, so the state is "absent".
 const UNUSED_PULL_REQUEST_NUMBER = "987654321";
 
+const RUNNING_ON_WINDOWS = process.platform === "win32";
+
+// The exit code fixtures/fake-docker.ts ends with; the launcher must pass it through.
+const FAKE_DOCKER_EXIT_CODE = 7;
+
+// The canonical native form of a path, matching what the launcher prints (it
+// normalizes git's C:/... and Windows 8.3 short names the same way).
+function canonicalPath(path: string): string {
+  return realpathSync.native(path);
+}
+
+// The beginning of the printed command, up to and including the PATH prefix, in the
+// dialect daw uses on this platform.
+function expectedCommandPrefix(projectRoot: string): string {
+  if (RUNNING_ON_WINDOWS) {
+    return `Set-Location -LiteralPath ${quoteForPowerShell(canonicalPath(projectRoot))}; $env:Path = ${quoteForPowerShell(`${ISSUE_TEAM_BIN};`)} + $env:Path; & `;
+  }
+  return `cd ${quoteForPosixShell(canonicalPath(projectRoot))} && PATH=${quoteForPosixShell(ISSUE_TEAM_BIN)}:"$PATH" `;
+}
+
+const quoteForThisPlatform = RUNNING_ON_WINDOWS ? quoteForPowerShell : quoteForPosixShell;
+
 type CliResult = { exitCode: number; standardOutput: string; standardError: string };
 
 function runCli(
   cliArguments: string[],
   workingDirectory: string,
-  environment: Record<string, string> = {},
+  pathValue: string = readPathValue(process.env),
 ): CliResult {
   const completedProcess = Bun.spawnSync(["bun", CLI_PATH, ...cliArguments], {
     cwd: workingDirectory,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...environment },
+    env: withPathValue(process.env, pathValue),
   });
   return {
     exitCode: completedProcess.exitCode,
@@ -55,7 +81,7 @@ describe("daw --print", () => {
     const result = runCli(["issue-team", "work-issue", "--issue", "12", "--print"], projectRoot);
     expect(result).toEqual({
       exitCode: 0,
-      standardOutput: `cd ${realpathSync(projectRoot)} && PATH=${ISSUE_TEAM_BIN}:"$PATH" docker agent run ${ISSUE_TEAM_CONFIG} --agent root --worktree=print-app-issue-12 --worktree-base origin/${FIXTURE_DEFAULT_BRANCH} 'Work issue #12'`,
+      standardOutput: `${expectedCommandPrefix(projectRoot)}docker agent run ${quoteForThisPlatform(ISSUE_TEAM_CONFIG)} --agent root --worktree=print-app-issue-12 --worktree-base origin/${FIXTURE_DEFAULT_BRANCH} 'Work issue #12'`,
       standardError: "",
     });
   });
@@ -99,31 +125,55 @@ describe("daw --print", () => {
   });
 });
 
-// Runs daw inside a pseudo-terminal (util-linux `script`), so the launcher believes it
-// may prompt. `timeout` turns "stuck waiting at a prompt" into a non-zero exit.
-const TERMINAL_RUN_TIMEOUT_SECONDS = "10";
-const TIMEOUT_EXIT_CODE = 124;
+// Runs daw attached to a pseudo-terminal (Bun.Terminal), so the launcher believes it
+// may prompt. A launcher stuck at a prompt is killed after the timeout, well inside
+// bun test's default 5 s per-test limit, and reported as timedOut.
+const TERMINAL_RUN_TIMEOUT_MILLISECONDS = 3000;
+// Wide enough that the printed command never wraps.
+const TERMINAL_COLUMNS = 400;
+const TERMINAL_ROWS = 50;
 
-function runCliInTerminal(cliArguments: string[], workingDirectory: string): CliResult {
-  const commandLine = ["bun", CLI_PATH, ...cliArguments].map((word) => `'${word}'`).join(" ");
-  const completedProcess = Bun.spawnSync(
-    ["timeout", TERMINAL_RUN_TIMEOUT_SECONDS, "script", "-qec", commandLine, "/dev/null"],
-    { cwd: workingDirectory, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
-  );
+type TerminalRunResult = { exitCode: number; timedOut: boolean; screenText: string };
+
+async function runCliInTerminal(
+  cliArguments: string[],
+  workingDirectory: string,
+): Promise<TerminalRunResult> {
+  const decoder = new TextDecoder();
+  let rawScreen = "";
+  await using terminal = new Bun.Terminal({
+    cols: TERMINAL_COLUMNS,
+    rows: TERMINAL_ROWS,
+    data(_terminal, data) {
+      rawScreen += decoder.decode(data);
+    },
+  });
+  const childProcess = Bun.spawn(["bun", CLI_PATH, ...cliArguments], {
+    cwd: workingDirectory,
+    terminal,
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    childProcess.kill();
+  }, TERMINAL_RUN_TIMEOUT_MILLISECONDS);
+  const exitCode = await childProcess.exited;
+  clearTimeout(timer);
   return {
-    exitCode: completedProcess.exitCode,
-    standardOutput: completedProcess.stdout.toString().replaceAll("\r", "").trim(),
-    standardError: completedProcess.stderr.toString().trim(),
+    exitCode,
+    timedOut,
+    // Terminals end lines with \r\n and color with escape codes; neither is content.
+    screenText: stripVTControlCharacters(rawScreen).replaceAll("\r", "").trim(),
   };
 }
 
 describe("daw in a terminal", () => {
-  test("uses the repository around the current directory without asking for it", () => {
+  test("uses the repository around the current directory without asking for it", async () => {
     const { projectRoot } = createFixtureProject("terminal-app");
     const subdirectory = join(projectRoot, "src", "deep");
     mkdirSync(subdirectory, { recursive: true });
     // Every other value is a flag, so the project is the only thing left to ask about.
-    const result = runCliInTerminal(
+    const result = await runCliInTerminal(
       [
         "issue-team",
         "work-issue",
@@ -137,13 +187,20 @@ describe("daw in a terminal", () => {
       ],
       subdirectory,
     );
-    expect(result.exitCode).not.toBe(TIMEOUT_EXIT_CODE);
+    expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
-    expect(result.standardOutput).toStartWith(`cd ${realpathSync(projectRoot)} && `);
+    expect(result.screenText).toContain(expectedCommandPrefix(projectRoot));
   });
 });
 
 describe("daw usage errors", () => {
+  // Every case here exits before touching the repository, so they share one fixture;
+  // building one per case cost about 8 git processes each, which is slow on Windows.
+  let usageProjectRoot = "";
+  beforeAll(() => {
+    usageProjectRoot = createFixtureProject("usage-app").projectRoot;
+  });
+
   test.each([
     [
       ["issue-team", "work-issue", "--issue", "12", "--effort", "lwo"],
@@ -167,8 +224,7 @@ describe("daw usage errors", () => {
     [["issue-team", "work-issue", "12"], "unexpected arguments: 12; parameters are flags"],
     [[], "name a team, or run daw in a terminal to pick one"],
   ])("daw %p exits 2 with a specific message", (cliArguments, expectedMessage) => {
-    const { projectRoot } = createFixtureProject("usage-app");
-    const result = runCli([...cliArguments, "--print"], projectRoot);
+    const result = runCli([...cliArguments, "--print"], usageProjectRoot);
     expect(result.exitCode).toBe(EXIT_CODE_USAGE);
     expect(result.standardOutput).toBe("");
     expect(result.standardError).toContain(expectedMessage);
@@ -188,45 +244,38 @@ describe("daw launching", () => {
   test("runs docker in the project with the team's bin first on PATH and returns its exit code", () => {
     const { projectRoot } = createFixtureProject("launch-app");
     const fakeBinDirectory = createTemporaryDirectory();
-    const fakeDockerPath = join(fakeBinDirectory, "docker");
-    const FAKE_DOCKER_EXIT_CODE = 7;
-    // Records what the launcher actually spawned: working directory, where the
-    // issue-team helper resolves from on PATH, and each argument on its own line.
-    writeFileSync(
-      fakeDockerPath,
-      `#!/usr/bin/env bash
-echo "cwd=$PWD"
-echo "helper=$(command -v issue-team-base-ref)"
-printf 'arg=%s\\n' "$@"
-exit ${FAKE_DOCKER_EXIT_CODE}
-`,
+    writeFakeCommand(
+      fakeBinDirectory,
+      "docker",
+      join(import.meta.dir, "fixtures", "fake-docker.ts"),
     );
-    chmodSync(fakeDockerPath, 0o755);
 
-    // Started from an unrelated directory, so the cwd check proves the launcher moved
-    // into the project rather than inheriting the caller's directory.
+    // Started from an unrelated directory, so the working-directory check proves the
+    // launcher moved into the project rather than inheriting the caller's directory.
     const result = runCli(
       ["issue-team", "work-issue", "--issue", "5", "--project", projectRoot],
       createTemporaryDirectory(),
-      { PATH: `${fakeBinDirectory}:${process.env.PATH ?? ""}` },
+      `${fakeBinDirectory}${delimiter}${readPathValue(process.env)}`,
     );
 
     expect(result.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
-    expect(result.standardOutput.split("\n")).toEqual([
-      `cwd=${realpathSync(projectRoot)}`,
-      `helper=${join(ISSUE_TEAM_BIN, "issue-team-base-ref")}`,
-      "arg=agent",
-      "arg=run",
-      `arg=${ISSUE_TEAM_CONFIG}`,
-      "arg=--agent",
-      "arg=root",
-      "arg=--worktree=launch-app-issue-5",
-      "arg=--worktree-base",
-      `arg=origin/${FIXTURE_DEFAULT_BRANCH}`,
-      "arg=Work issue #5",
-    ]);
+    expect(JSON.parse(result.standardOutput)).toEqual({
+      workingDirectory: canonicalPath(projectRoot),
+      firstPathEntry: ISSUE_TEAM_BIN,
+      arguments: [
+        "agent",
+        "run",
+        ISSUE_TEAM_CONFIG,
+        "--agent",
+        "root",
+        "--worktree=launch-app-issue-5",
+        "--worktree-base",
+        `origin/${FIXTURE_DEFAULT_BRANCH}`,
+        "Work issue #5",
+      ],
+    });
     // Without prompts there is no confirmation, so the command is echoed as a receipt.
-    expect(result.standardError).toStartWith("daw: cd ");
+    expect(result.standardError).toStartWith(`daw: ${expectedCommandPrefix(projectRoot)}`);
   });
 });
 

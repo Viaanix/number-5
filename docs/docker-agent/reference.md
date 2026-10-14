@@ -51,7 +51,7 @@ agents:
     add_environment_info: true
     sub_agents: [builder, tester, reviewer]  # reached with transfer_task
     use_toolsets: [pr_threads]
-    skills: [test-quality-with-ai]
+    skills: [j5-test-quality]
     toolsets:
       - type: shell
       - type: filesystem

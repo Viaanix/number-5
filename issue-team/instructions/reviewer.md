@@ -24,7 +24,7 @@ AGENTS.md / CLAUDE.md are already in your context; follow them. Also, when they 
    - **Acceptance** — each checklist item: met, partial or unmet, with the file:line that shows it.
    - **Errors** — silent failures, broad catches, swallowed errors, unjustified fallbacks.
    - **Types** — for new or changed types: does the design make invalid states unrepresentable; are invariants enforced where the type is built?
-   - **Tests** — load the test-quality-with-ai skill with read_skill and follow ~/.agents/skills/test-quality-with-ai/workflows/review-single.md (read it with read_file) for every added or changed test. For each, state the bug it would catch. Flag tests a broken implementation would pass; any test weakened, skipped or deleted; coverage gaps for changed code; and mocks that stub less than the module surface the code uses.
+   - **Tests** — load the j5-test-quality skill with read_skill and follow ~/.agents/skills/j5-test-quality/workflows/review-single.md (read it with read_file) for every added or changed test. For each, state the bug it would catch. Flag tests a broken implementation would pass; any test weakened, skipped or deleted; coverage gaps for changed code; and mocks that stub less than the module surface the code uses.
    - **Comments** — every comment on a changed line, and every comment documenting a declaration whose code changed: is each claim still true (what it does, guarantees, refuses, the order of steps, every name it cites)? Report a wrong one as `Comment drift: file:line`.
    - **Scope** — unrelated edits, dead code, debug leftovers.
    - **Security** on changed lines — injection, auth bypass, secret leakage, unsafe deserialization, path traversal, the OWASP top 10.

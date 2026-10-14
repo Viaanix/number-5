@@ -2,7 +2,7 @@
 // mocks git: the git helpers are tested against repositories built the same way a
 // user's clone is (a bare origin, cloned, with origin/HEAD set by the clone).
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -113,4 +113,16 @@ export function buildTeamYaml(flavorNames: string[]): string {
     }
   }
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Puts a fake command on disk that runs a Bun script: an extensionless sh launcher
+ * for Linux and macOS and a .cmd launcher that Windows finds through PATHEXT, the
+ * same pair the team helpers in issue-team/bin use. Prepend the directory to PATH.
+ */
+export function writeFakeCommand(directory: string, commandName: string, scriptPath: string): void {
+  const posixLauncherPath = join(directory, commandName);
+  writeFileSync(posixLauncherPath, `#!/bin/sh\nexec bun "${scriptPath}" "$@"\n`);
+  chmodSync(posixLauncherPath, 0o755);
+  writeFileSync(join(directory, `${commandName}.cmd`), `@bun "${scriptPath}" %*\r\n`);
 }
