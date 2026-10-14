@@ -6,13 +6,18 @@
 // Every value can come from a flag; anything missing is asked for when stdin and
 // stdout are a terminal, and is an error otherwise. `--print` shows the exact
 // command instead of running it.
+//
+// An entry point with a `queue:` block can also run over a queue (`--queue 1,2,3` or
+// `--queue-label <label>`): once per value, one after another, unattended. run.ts
+// executes it; queue.ts reads each item's outcome.
 
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
-import { readPathValue, withPathValue } from "./environment.ts";
+import { readPathValue } from "./environment.ts";
 import {
   inspectWorktreePath,
+  listOpenIssuesWithLabel,
   listRemoteBranches,
   localBranchExists,
   refExists,
@@ -25,6 +30,7 @@ import { describeInvalidEffort, describeInvalidParameterValue } from "./paramete
 import {
   buildLaunchPlan,
   type LaunchPlan,
+  type QueueItemContext,
   resolveWorktreeLocation,
   type WorktreeFacts,
 } from "./plan.ts";
@@ -36,6 +42,8 @@ import {
   showBanner,
   showNote,
 } from "./prompts.ts";
+import { describeRoundLimit, parseQueueValues, parseRoundLimit, type RoundLimit } from "./queue.ts";
+import { runPlan, runQueue } from "./run.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
 import { discoverTeams, resolveTeamsDirectory } from "./teams.ts";
@@ -53,6 +61,15 @@ const LIST_COMMAND = "list";
 
 // Value of the effort choice that passes no --flavor. Empty because a flavor name never is.
 const TEAM_DEFAULT_EFFORT_CHOICE = "";
+
+// Queue runs: their logs and summary go under <project>/.j5/queue/<start time>/, the
+// same .j5/ directory test-quality's audit reports use.
+const QUEUE_LOG_DIRECTORY_PARTS = [".j5", "queue"];
+// docker-agent's flag for a run without the TUI; every queue item is unattended.
+const UNATTENDED_FLAG = "--exec";
+const QUEUE_SOURCE_SINGLE = "single";
+const QUEUE_SOURCE_VALUES = "values";
+const QUEUE_SOURCE_LABEL = "label";
 
 /** A mistake in how j5 was called; reported with a pointer to --help. */
 class UsageError extends Error {
@@ -99,12 +116,16 @@ function formatUsage(): string {
     "  --project <path>   checkout to work on (default: the current directory's git repository)",
     "  --base <ref>       branch a new worktree from this ref (default: the remote default branch)",
     "  --effort <flavor>  one of the team's flavors in team.yaml (default: the team's defaults)",
+    "  --queue <n,n,...>  run the entry point once per value, unattended (entry points with a queue)",
+    "  --queue-label <l>  the same, over every open issue with this label (needs gh access to the repo)",
+    "  --max-rounds <n>   fix rounds per queue item, or 'none' for no limit (asked for when missing)",
     "  --print            print the command instead of running it",
     "  --help, -h         this help",
     "",
     "Examples:",
     "  j5 issue-team work-issue --issue 123 --effort low",
     "  j5 issue-team pr-followup --pr 456 --project ~/code/app -- --safety balanced",
+    "  j5 issue-team work-issue --queue 474,480 --max-rounds 5",
   ].join("\n");
 }
 
@@ -283,9 +304,14 @@ async function collectParameterValues(
   entryPoint: EntryPointDefinition,
   optionValues: Map<string, string>,
   interaction: Interaction,
+  queueParameterName: string | undefined,
 ): Promise<Record<string, string>> {
   const parameterValues: Record<string, string> = {};
   for (const [parameterName, parameter] of Object.entries(entryPoint.parameters)) {
+    // In a queue run the queue supplies this parameter, one value per item.
+    if (parameterName === queueParameterName) {
+      continue;
+    }
     const flagValue = optionValues.get(parameterName);
     if (flagValue !== undefined) {
       const problem = describeInvalidParameterValue(parameterName, parameter, flagValue);
@@ -307,53 +333,162 @@ async function collectParameterValues(
   return parameterValues;
 }
 
-async function runPlan(plan: LaunchPlan): Promise<number> {
-  const [commandName, ...commandArguments] = plan.commandWords;
-  if (commandName === undefined) {
-    throw new Error("the launch plan has no command");
-  }
-  // Resolve the executable against the PATH the child will get, including Windows
-  // PATHEXT lookup (docker → docker.exe), so a missing docker is reported by name
-  // instead of as a spawn error.
-  const executablePath = Bun.which(commandName, { PATH: plan.pathEnvironment });
-  if (executablePath === null) {
-    throw new Error(
-      `'${commandName}' was not found on PATH; is Docker with the docker agent plugin installed?`,
-    );
-  }
-  // Worktree steps run after the docker check, so a missing docker leaves no worktree
-  // behind, and stop at the first failure, so docker-agent never starts in a
-  // directory that was not created. Git's own output stays visible.
-  for (const stepWords of plan.preparationSteps) {
-    const completedStep = Bun.spawnSync(stepWords, {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    if (completedStep.exitCode !== EXIT_CODE_SUCCESS) {
-      throw new Error(
-        `${stepWords.join(" ")} failed (exit ${completedStep.exitCode}); docker-agent was not started`,
+/** Where a queue's values come from, before the project is known. */
+type QueueSource = { kind: "values"; values: string[] } | { kind: "label"; label: string };
+
+/** A queue run's choices; undefined from chooseQueue means a single run. */
+type QueueChoice = { parameterName: string; source: QueueSource; roundLimit: RoundLimit };
+
+/**
+ * Decides between a single run and a queue run, from --queue / --queue-label /
+ * --max-rounds or, in a terminal, by asking. Only entry points with a `queue:` block
+ * can run as a queue.
+ */
+async function chooseQueue(
+  entryPointName: string,
+  entryPoint: EntryPointDefinition,
+  optionValues: Map<string, string>,
+  interaction: Interaction,
+): Promise<QueueChoice | undefined> {
+  const requestedValues = optionValues.get("queue");
+  const requestedLabel = optionValues.get("queue-label");
+  const requestedRoundLimit = optionValues.get("max-rounds");
+  const queue = entryPoint.queue;
+  if (queue === undefined) {
+    if (
+      requestedValues !== undefined ||
+      requestedLabel !== undefined ||
+      requestedRoundLimit !== undefined
+    ) {
+      throw new UsageError(
+        `--queue, --queue-label and --max-rounds only apply to entry points with a queue; ${entryPointName} has none`,
       );
     }
+    return undefined;
   }
-  let childProcess: Bun.Subprocess;
-  try {
-    childProcess = Bun.spawn([executablePath, ...commandArguments], {
-      cwd: plan.workingDirectory,
-      env: withPathValue(process.env, plan.pathEnvironment),
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`could not start '${plan.commandWords[0]}': ${reason}`, { cause: error });
+  if (requestedValues !== undefined && requestedLabel !== undefined) {
+    throw new UsageError("--queue and --queue-label are alternatives; give one");
   }
-  // Ctrl-C belongs to the docker-agent TUI (it cancels the current turn). The terminal
-  // sends SIGINT to the whole foreground process group, so the launcher must ignore it
-  // or it would exit and leave the agent running without its parent.
-  process.on("SIGINT", () => {});
-  return childProcess.exited;
+  const singleValueGiven = optionValues.has(queue.parameter);
+  if (singleValueGiven && (requestedValues !== undefined || requestedLabel !== undefined)) {
+    throw new UsageError(
+      `--${queue.parameter} runs one item; --queue / --queue-label run several; give one`,
+    );
+  }
+
+  let source: QueueSource | undefined;
+  if (requestedValues !== undefined) {
+    const parsed = parseQueueValues("queue", requestedValues);
+    if ("problem" in parsed) {
+      throw new UsageError(parsed.problem);
+    }
+    source = { kind: "values", values: parsed.values };
+  } else if (requestedLabel !== undefined) {
+    source = { kind: "label", label: requestedLabel };
+  } else if (!singleValueGiven && interaction.canPrompt) {
+    interaction.askedAnything = true;
+    const sourceKind = await askToChoose(`Run ${entryPointName} on`, [
+      { value: QUEUE_SOURCE_SINGLE, label: `one ${queue.parameter}` },
+      {
+        value: QUEUE_SOURCE_VALUES,
+        label: `a queue of ${queue.parameter} numbers`,
+        hint: "unattended",
+      },
+      {
+        value: QUEUE_SOURCE_LABEL,
+        label: `every open issue with a label`,
+        hint: "unattended; needs gh access",
+      },
+    ]);
+    if (sourceKind === QUEUE_SOURCE_VALUES) {
+      const answer = await askForText(
+        `${PARAMETER_PROMPT_PREFIX} ${queue.parameter} numbers, comma-separated`,
+        (value) => {
+          const parsed = parseQueueValues("queue", value);
+          return "problem" in parsed ? parsed.problem : undefined;
+        },
+      );
+      const parsed = parseQueueValues("queue", answer);
+      if ("problem" in parsed) {
+        throw new UsageError(parsed.problem);
+      }
+      source = { kind: "values", values: parsed.values };
+    } else if (sourceKind === QUEUE_SOURCE_LABEL) {
+      const label = await askForText(`${PARAMETER_PROMPT_PREFIX} label`, (value) =>
+        value.trim() === "" ? "a label is needed" : undefined,
+      );
+      source = { kind: "label", label: label.trim() };
+    }
+  }
+  if (source === undefined) {
+    if (requestedRoundLimit !== undefined) {
+      throw new UsageError("--max-rounds only applies with --queue or --queue-label");
+    }
+    return undefined;
+  }
+
+  let roundLimitText = requestedRoundLimit;
+  if (roundLimitText === undefined) {
+    if (!interaction.canPrompt) {
+      throw new UsageError("missing --max-rounds <n|none> (fix rounds per queue item)");
+    }
+    interaction.askedAnything = true;
+    roundLimitText = await askForText(
+      `${PARAMETER_PROMPT_PREFIX} fix rounds per item (a number; empty for no limit)`,
+      (value) => {
+        const parsed = parseRoundLimit(value);
+        return "problem" in parsed ? parsed.problem : undefined;
+      },
+    );
+  }
+  const parsedRoundLimit = parseRoundLimit(roundLimitText);
+  if ("problem" in parsedRoundLimit) {
+    throw new UsageError(parsedRoundLimit.problem);
+  }
+  return { parameterName: queue.parameter, source, roundLimit: parsedRoundLimit.limit };
+}
+
+/** Looks up what exists where the entry point's worktree goes, for buildLaunchPlan. */
+function resolveWorktreeFacts(
+  team: WorkflowManifest,
+  entryPointName: string,
+  entryPoint: EntryPointDefinition,
+  projectRoot: string,
+  repositoryName: string,
+  parameterValues: Record<string, string>,
+): WorktreeFacts | undefined {
+  const worktreeLocation = resolveWorktreeLocation(
+    team,
+    entryPointName,
+    projectRoot,
+    repositoryName,
+    parameterValues,
+  );
+  if (worktreeLocation === undefined) {
+    return undefined;
+  }
+  const state = inspectWorktreePath(projectRoot, worktreeLocation.path);
+  let pullRequestBranch: WorktreeFacts["pullRequestBranch"];
+  if (entryPoint.worktree.mode === "pr" && state.kind === "absent") {
+    // Read-only, over git's own transport (SSH for an SSH origin): no gh login needed.
+    const branchName = resolvePullRequestBranch(
+      projectRoot,
+      Number(parameterValues[entryPoint.worktree.pull_request_parameter]),
+    );
+    pullRequestBranch = {
+      name: branchName,
+      existsLocally: localBranchExists(projectRoot, branchName),
+    };
+  }
+  return { state, pullRequestBranch };
+}
+
+// A directory name from the start time, without the colons Windows forbids in paths.
+function formatQueueStartTime(startTime: Date): string {
+  return startTime
+    .toISOString()
+    .replace(/\.\d+Z$/, "Z")
+    .replaceAll(":", "-");
 }
 
 async function launch(
@@ -414,55 +549,91 @@ async function launch(
       ? await chooseBaseRef(projectRoot, requestedBaseRef, interaction)
       : undefined;
   const effort = await chooseEffort(team, parsedArguments.optionValues.get("effort"), interaction);
-  const parameterValues = await collectParameterValues(
+  const queueChoice = await chooseQueue(
+    entryPointName,
     entryPoint,
     parsedArguments.optionValues,
     interaction,
   );
+  const parameterValues = await collectParameterValues(
+    entryPoint,
+    parsedArguments.optionValues,
+    interaction,
+    queueChoice?.parameterName,
+  );
 
   const repositoryName = basename(projectRoot);
-  const worktreeLocation = resolveWorktreeLocation(
-    team,
-    entryPointName,
-    projectRoot,
-    repositoryName,
-    parameterValues,
-  );
-  let worktree: WorktreeFacts | undefined;
-  if (worktreeLocation !== undefined) {
-    const state = inspectWorktreePath(projectRoot, worktreeLocation.path);
-    let pullRequestBranch: WorktreeFacts["pullRequestBranch"];
-    if (entryPoint.worktree.mode === "pr" && state.kind === "absent") {
-      // Read-only, over git's own transport (SSH for an SSH origin): no gh login needed.
-      const branchName = resolvePullRequestBranch(
+  const buildPlan = (
+    values: Record<string, string>,
+    queueItem: QueueItemContext | undefined,
+    passthroughArguments: string[],
+  ): LaunchPlan =>
+    buildLaunchPlan({
+      manifest: team,
+      entryPointName,
+      projectRoot,
+      repositoryName,
+      parameterValues: values,
+      effort,
+      baseRef,
+      worktree: resolveWorktreeFacts(
+        team,
+        entryPointName,
+        entryPoint,
         projectRoot,
-        Number(parameterValues[entryPoint.worktree.pull_request_parameter]),
-      );
-      pullRequestBranch = {
-        name: branchName,
-        existsLocally: localBranchExists(projectRoot, branchName),
-      };
+        repositoryName,
+        values,
+      ),
+      queueItem,
+      passthroughArguments,
+      inheritedPath: readPathValue(process.env),
+    });
+  const renderCommandLine = (plan: LaunchPlan): string =>
+    renderPlanAsShellCommand(plan, team.pathDirectories, shellDialectForPlatform(process.platform));
+
+  if (queueChoice !== undefined) {
+    const queueValues =
+      queueChoice.source.kind === "values"
+        ? queueChoice.source.values
+        : listOpenIssuesWithLabel(projectRoot, queueChoice.source.label);
+    if (queueValues.length === 0 && queueChoice.source.kind === "label") {
+      throw new UsageError(`no open issues have the label '${queueChoice.source.label}'`);
     }
-    worktree = { state, pullRequestBranch };
+    const unattendedPassthrough = parsedArguments.passthroughArguments.includes(UNATTENDED_FLAG)
+      ? parsedArguments.passthroughArguments
+      : [...parsedArguments.passthroughArguments, UNATTENDED_FLAG];
+    const roundLimitText = describeRoundLimit(queueChoice.roundLimit);
+    const queueItems = queueValues.map((value, index) => ({
+      value,
+      plan: buildPlan(
+        { ...parameterValues, [queueChoice.parameterName]: value },
+        { position: index + 1, count: queueValues.length, roundLimitText },
+        unattendedPassthrough,
+      ),
+    }));
+    if (parsedArguments.switches.has("print")) {
+      console.log(queueItems.map((item) => renderCommandLine(item.plan)).join("\n"));
+      return EXIT_CODE_SUCCESS;
+    }
+    const queueDescription = `${team.name} ${entryPointName}, unattended, ${queueChoice.parameterName} ${queueValues.join(", ")}; ${roundLimitText}`;
+    if (interaction.askedAnything) {
+      showNote(queueDescription, "About to run a queue");
+      if (!(await askToConfirm("Launch?"))) {
+        throw new LaunchCancelledError();
+      }
+    } else {
+      console.error(`j5: queue: ${queueDescription}`);
+    }
+    return runQueue(
+      queueItems,
+      join(projectRoot, ...QUEUE_LOG_DIRECTORY_PARTS, formatQueueStartTime(new Date())),
+      queueChoice.parameterName,
+      `j5 queue: ${queueDescription}`,
+    );
   }
 
-  const plan = buildLaunchPlan({
-    manifest: team,
-    entryPointName,
-    projectRoot,
-    repositoryName,
-    parameterValues,
-    effort,
-    baseRef,
-    worktree,
-    passthroughArguments: parsedArguments.passthroughArguments,
-    inheritedPath: readPathValue(process.env),
-  });
-  const commandLine = renderPlanAsShellCommand(
-    plan,
-    team.pathDirectories,
-    shellDialectForPlatform(process.platform),
-  );
+  const plan = buildPlan(parameterValues, undefined, parsedArguments.passthroughArguments);
+  const commandLine = renderCommandLine(plan);
 
   if (parsedArguments.switches.has("print")) {
     console.log(commandLine);

@@ -115,6 +115,12 @@ The conversation does carry over: two `--exec` turns of one harness agent with t
 
 **`harness.model` does apply.** With `harness: { type: claude-code, model: claude-haiku-4-5 }` the run's Claude Code transcript (`~/.claude/projects/<cwd>/*.jsonl`) records `claude-haiku-4-5-20251001`; without it, the user's own Claude Code default (`claude-opus-5-5` here). Checked on the real team files too: issue-team `root` → `claude-sonnet-5-5`; test-quality `writer --flavor low` → `claude-haiku-4-5-20251001` (2026-10-14). A model not set in `team.yaml` is whatever the user's Claude Code is set to.
 
+**When the harness itself cannot run,** docker-agent prints one line and exits 1. Seen with the Claude session limit (v1.145.0, Claude Code 2.1.284, 2026-10-14):
+```
+You've hit your session limit · resets 1pm (America/Chicago)harness claude-code failed: wait: exit status 1
+```
+`j5`'s queue stops on `harness … failed` with a non-zero exit (`AGENT_INFRASTRUCTURE_FAILURE_PATTERN` in `launcher/src/queue.ts`) instead of failing every remaining issue in seconds. If an upgrade rewords this line, that stop silently becomes one fast failure per issue: re-check it.
+
 **What does reach it:** the docker-agent process's `PATH`. With a team's `bin/` prepended (as `j5` does), the harness ran `test-quality-prescreen` by bare name through its own shell tool and got the helper's real output and exit code.
 
 ### `--worktree` does not move a harness agent into the worktree

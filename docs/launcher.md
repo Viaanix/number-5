@@ -41,12 +41,15 @@ j5 issue-team closeout --pr 456 --print    # show the exact command, run nothing
 | `--base <ref>` | Ref a `new` worktree branches from. Only for `new` worktrees | The remote default branch (`origin/HEAD`, else `gh`) |
 | `--effort <flavor>` | A `flavors:` key from the team's `team.yaml`, passed as `--flavor` | None: the team as written |
 | `--<parameter> <value>` | The entry point's parameters, e.g. `--issue 123` | Asked for, or an error when not in a terminal |
-| `--print` | Print the command as one line instead of running it: bash/zsh syntax on Linux and macOS, PowerShell on Windows | |
+| `--queue <n,n,…>` | Run the entry point once per value, unattended ([queue runs](#queue-runs)). Only entry points with a `queue:` block | |
+| `--queue-label <label>` | The same, over every open issue with this label, oldest first. Needs a `gh` login (or `GH_TOKEN`) that can see the repository | |
+| `--max-rounds <n\|none>` | Fix rounds per queue item; `none` for no limit | Asked for, or an error when not in a terminal |
+| `--print` | Print the command as one line instead of running it: bash/zsh syntax on Linux and macOS, PowerShell on Windows. A queue prints one line per item | |
 | `-- …` | Everything after a bare `--` is appended to `docker agent run` | |
 
 Anything missing is asked for when stdin and stdout are a terminal; otherwise it is an error (exit 2). When anything was asked, the command is shown and confirmed before it runs. Ctrl-C at a prompt exits 130 and launches nothing. Once docker-agent is running, Ctrl-C belongs to its TUI.
 
-The base-branch list shows remote branches as of your last `git fetch`. docker-agent fetches the chosen base itself before branching.
+The base-branch list shows remote branches as of your last `git fetch`. `j5` fetches the chosen base before it creates the worktree.
 
 ## What it runs
 
@@ -57,6 +60,17 @@ git -C ~/code/my-app fetch origin main && git -C ~/code/my-app worktree add -b w
 ```
 
 `j5` creates the worktree itself and starts docker-agent inside it with `--working-dir`. docker-agent's own `--worktree` / `--worktree-pr` create a worktree but leave a Claude Code harness agent in your checkout ([gotcha](docker-agent/gotchas.md#--worktree-does-not-move-a-harness-agent-into-the-worktree)). The git steps run before docker-agent and stop it from starting if one fails. `--print` runs none of them; on Windows its output chains them with `&&`, which needs PowerShell 7+.
+
+## Queue runs
+
+`j5 issue-team work-issue --queue 474,480,482 --max-rounds 5` (or `--queue-label ready`) runs the entry point once per issue, one after another, **unattended**:
+
+- Each item gets its own worktree, exactly as a single run would, and runs `docker agent run … --exec`: no TUI, nobody to answer. The entry point's `queue.preamble` goes before its prompt and says so (issue-team's tells the agent to stop and report instead of asking, replaces its fix-round limit with `--max-rounds`, and asks for a last line `RESULT: PR <url>` or `RESULT: FAILED <reason>`).
+- Each item's output is shown live and saved to `<project>/.j5/queue/<start time>/issue-<n>.log`; `summary.md` in the same directory lists every item's outcome.
+- **The outcome comes from the `RESULT:` line**, never the exit code: `docker agent run --exec` exits 0 whenever the agent finishes its turn. No `RESULT:` line means the item failed.
+- An item that fails (including a failed git step, e.g. its branch already exists) is reported and the queue goes on. An item whose agent could not run at all (docker-agent printed `harness … failed`, e.g. the Claude session limit) **stops the queue**, since every later item would fail the same way. Ctrl-C stops it after the current item.
+- `j5` exits 0 only when every item opened a pull request, 1 otherwise.
+- In a terminal, an entry point with a queue that gets neither `--<parameter>` nor `--queue` / `--queue-label` asks whether to run one item, a list, or a label; a queue run without `--max-rounds` asks for the limit (empty for none). `--print` runs nothing and creates no log directory; `--queue-label` still asks GitHub for the issues.
 
 ## The manifest: `workflows/<team>/workflow.yaml`
 
@@ -98,7 +112,18 @@ Worktrees go **beside the project**: `<parent of the checkout>/<name>`, e.g. `~/
 
 A `new` worktree whose branch `worktree-<name>` already exists without the directory (e.g. the directory was deleted, or an older docker-agent worktree elsewhere holds it) stops at `git worktree add`; delete the branch or remove that worktree first.
 
-**Reserved parameter names:** `repo`, `project`, `base`, `effort`, `print`, `help`.
+**Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `effort`, `queue`, `queue-label`, `max-rounds`, `print`, `help`.
+
+**Queue block.** An entry point can also run over a queue:
+
+```yaml
+    queue:
+      parameter: issue            # an integer parameter; each queue value fills it
+      preamble: |                 # goes before `message` for every item
+        UNATTENDED QUEUE RUN — issue {issue}, item {position} of {count}. … Fix rounds: {round_limit}. …
+```
+
+The preamble may use the parameters, `{repo}`, and three placeholders only it has: `{position}` and `{count}` (where the item stands) and `{round_limit}` (`at most 3 fix rounds`, or `no limit on the number of fix rounds`).
 
 **Effort** is not declared in the manifest. The valid values are the `flavors:` keys in `team.yaml`, read at launch, because docker-agent silently ignores unknown flavors ([gotcha](docker-agent/gotchas.md#an-unknown---flavor-is-silently-ignored)).
 

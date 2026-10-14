@@ -17,6 +17,17 @@ export const MANIFEST_FILE_NAME = "workflow.yaml";
 /** Placeholder every template may use: the basename of the project's git toplevel. */
 export const BUILT_IN_REPOSITORY_PLACEHOLDER = "repo";
 
+/**
+ * Placeholders only a queue preamble may use: the item's 1-based place in the queue,
+ * the queue's length, and the fix-round limit as words ("at most 3 fix rounds").
+ */
+export const QUEUE_PLACEHOLDERS = {
+  position: "position",
+  count: "count",
+  roundLimit: "round_limit",
+} as const;
+const QUEUE_PLACEHOLDER_NAMES: string[] = Object.values(QUEUE_PLACEHOLDERS);
+
 // Parameter names become `--<name>` command-line flags, so they are kept to
 // lowercase words joined by hyphens.
 const PARAMETER_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
@@ -25,6 +36,7 @@ const PARAMETER_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 // unreachable from the command line.
 const RESERVED_PARAMETER_NAMES: string[] = [
   BUILT_IN_REPOSITORY_PLACEHOLDER,
+  ...QUEUE_PLACEHOLDER_NAMES,
   ...LAUNCHER_VALUE_OPTION_NAMES,
   ...LAUNCHER_SWITCH_NAMES,
 ];
@@ -44,12 +56,21 @@ const worktreeSchema = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("pr"), pull_request_parameter: z.string().min(1) }),
 ]);
 
+// An entry point that can also run over a queue: once per value of one integer
+// parameter, unattended. The preamble goes before the message for every item and
+// tells the agent what changes when nobody is there to answer.
+const queueSchema = z.strictObject({
+  parameter: z.string().min(1),
+  preamble: z.string().min(1),
+});
+
 const entryPointSchema = z.strictObject({
   description: z.string().min(1),
   agent: z.string().min(1),
   parameters: z.record(z.string(), parameterSchema).default({}),
   worktree: worktreeSchema,
   message: z.string().min(1),
+  queue: queueSchema.optional(),
 });
 
 const manifestSchema = z.strictObject({
@@ -65,6 +86,9 @@ export type ParameterDefinition = z.infer<typeof parameterSchema>;
 
 /** How the launcher prepares the git checkout the agent runs in. */
 export type WorktreeDefinition = z.infer<typeof worktreeSchema>;
+
+/** How an entry point runs over a queue of values. */
+export type QueueDefinition = z.infer<typeof queueSchema>;
 
 /** One way of starting a team: an agent, its parameters, worktree mode and first message. */
 export type EntryPointDefinition = z.infer<typeof entryPointSchema>;
@@ -109,6 +133,25 @@ export function findManifestProblems(manifest: z.infer<typeof manifestSchema>): 
       for (const placeholderName of extractPlaceholderNames(template)) {
         if (!allowedPlaceholders.includes(placeholderName)) {
           problems.push(`${where}.${templateField}: unknown placeholder {${placeholderName}}`);
+        }
+      }
+    }
+
+    if (entryPoint.queue !== undefined) {
+      const queueParameter = entryPoint.parameters[entryPoint.queue.parameter];
+      if (queueParameter === undefined) {
+        problems.push(
+          `${where}.queue.parameter: '${entryPoint.queue.parameter}' is not a declared parameter`,
+        );
+      } else if (queueParameter.type !== "integer") {
+        problems.push(
+          `${where}.queue.parameter: '${entryPoint.queue.parameter}' must be an integer parameter`,
+        );
+      }
+      const allowedInPreamble = [...allowedPlaceholders, ...QUEUE_PLACEHOLDER_NAMES];
+      for (const placeholderName of extractPlaceholderNames(entryPoint.queue.preamble)) {
+        if (!allowedInPreamble.includes(placeholderName)) {
+          problems.push(`${where}.queue.preamble: unknown placeholder {${placeholderName}}`);
         }
       }
     }

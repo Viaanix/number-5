@@ -3,7 +3,7 @@
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
@@ -289,6 +289,26 @@ describe("j5 in a terminal", () => {
     const result = await runCliInTerminal(
       [
         "issue-team",
+        "closeout",
+        "--effort",
+        "low",
+        "--base",
+        `origin/${FIXTURE_DEFAULT_BRANCH}`,
+        "--print",
+      ],
+      projectRoot,
+    );
+    expect(result.timedOut).toBe(true);
+    expect(result.screenText).toContain("Need input: Merged pull request number");
+  });
+
+  // Catches a queue-capable entry point that never offers the queue in a terminal,
+  // or asks for a single issue number before knowing whether one is wanted.
+  test("asks whether to run one issue or a queue when work-issue gets neither", async () => {
+    const { projectRoot } = createFixtureProject("queue-prompt-app");
+    const result = await runCliInTerminal(
+      [
+        "issue-team",
         "work-issue",
         "--effort",
         "low",
@@ -299,7 +319,9 @@ describe("j5 in a terminal", () => {
       projectRoot,
     );
     expect(result.timedOut).toBe(true);
-    expect(result.screenText).toContain("Need input: Issue number");
+    expect(result.screenText).toContain("Run work-issue on");
+    expect(result.screenText).toContain("a queue of issue numbers");
+    expect(result.screenText).not.toContain("Need input: Issue number");
   });
 
   test("uses the repository around the current directory without asking for it", async () => {
@@ -426,6 +448,159 @@ describe("j5 launching", () => {
     const rerun = runCli(launchArguments, createTemporaryDirectory(), launchEnvironmentPath);
     expect(rerun.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
     expect(JSON.parse(rerun.standardOutput.trim())).toEqual(expectedDockerCall);
+  });
+});
+
+// The JSON line fixtures/fake-docker-queue.ts prints first, read from an item's log.
+type FakeDockerCall = {
+  issue: string;
+  workingDirectory: string;
+  unattended: boolean;
+  message: string;
+};
+
+function readFakeDockerCall(logPath: string): FakeDockerCall {
+  const parsed: unknown = JSON.parse(readFileSync(logPath, "utf8").split("\n")[0] ?? "");
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("issue" in parsed && typeof parsed.issue === "string") ||
+    !("workingDirectory" in parsed && typeof parsed.workingDirectory === "string") ||
+    !("unattended" in parsed && typeof parsed.unattended === "boolean") ||
+    !("message" in parsed && typeof parsed.message === "string")
+  ) {
+    throw new Error(`${logPath} does not start with the fake docker's JSON line`);
+  }
+  return {
+    issue: parsed.issue,
+    workingDirectory: parsed.workingDirectory,
+    unattended: parsed.unattended,
+    message: parsed.message,
+  };
+}
+
+describe("j5 queue", () => {
+  // One run over six issues with a fake docker that plays a different outcome per
+  // issue (fixtures/fake-docker-queue.ts). Catches: an outcome read from the exit code
+  // instead of the RESULT line; one failed issue stopping the queue; a session-limit
+  // failure not stopping it; items run without --exec or without the preamble first.
+  test("runs each issue unattended in its own worktree, reports each outcome, stops when the agent cannot run", () => {
+    const { projectRoot } = createFixtureProject("queue-app");
+    // Issue 4's branch already exists, so `git worktree add -b` fails for it.
+    runGit(projectRoot, ["branch", "worktree-queue-app-issue-4"]);
+    const fakeBinDirectory = createTemporaryDirectory();
+    writeFakeExecutable(
+      fakeBinDirectory,
+      "docker",
+      join(import.meta.dir, "fixtures", "fake-docker-queue.ts"),
+    );
+
+    const result = runCli(
+      ["issue-team", "work-issue", "--queue", "1,2,3,4,5,6", "--max-rounds", "2"],
+      projectRoot,
+      `${fakeBinDirectory}${delimiter}${readPathValue(process.env)}`,
+    );
+
+    expect(result.exitCode).toBe(1);
+    const queueDirectory = join(projectRoot, ".j5", "queue");
+    const [runDirectoryName, ...otherRuns] = readdirSync(queueDirectory);
+    expect(otherRuns).toEqual([]);
+    const runDirectory = join(queueDirectory, runDirectoryName ?? "");
+    const logPath = (issue: string) => join(runDirectory, `issue-${issue}.log`);
+    const summaryLines = readFileSync(join(runDirectory, "summary.md"), "utf8").split("\n");
+    expect(summaryLines.slice(0, 6)).toEqual([
+      "# j5 queue: issue-team work-issue, unattended, issue 1, 2, 3, 4, 5, 6; at most 2 fix rounds",
+      "",
+      "1 of 6 opened a pull request.",
+      "",
+      `- #1: PR https://example.invalid/pull/101 (log: ${logPath("1")})`,
+      `- #2: FAILED: the date parser test is still red after 2 rounds (log: ${logPath("2")})`,
+    ]);
+    // #3 and #5 quote the end of their output, which is long (it echoes the prompt).
+    expect(summaryLines[6]).toStartWith("- #3: FAILED: no RESULT line (exit 1): ");
+    expect(summaryLines[6]).toEndWith(
+      `partial work, then the agent stopped (log: ${logPath("3")})`,
+    );
+    expect(summaryLines[7]).toBe(
+      `- #4: FAILED: ${readFileSync(logPath("4"), "utf8").trim()} (log: ${logPath("4")})`,
+    );
+    expect(summaryLines[8]).toStartWith("- #5: STOPPED THE QUEUE: the agent could not run: ");
+    expect(summaryLines[8]).toEndWith(
+      `harness claude-code failed: wait: exit status 1 (log: ${logPath("5")})`,
+    );
+    expect(summaryLines.slice(9)).toEqual([
+      "- #6: not run",
+      "",
+      "Stopped early: the agent could not run, so every later item would have failed the same way.",
+      "",
+    ]);
+    expect(readFileSync(logPath("4"), "utf8")).toContain(
+      "worktree add -b worktree-queue-app-issue-4",
+    );
+    expect(existsSync(logPath("6"))).toBe(false);
+
+    // Every item that reached docker ran unattended, inside its own new worktree, with
+    // the preamble before the prompt.
+    for (const issue of ["1", "2", "3", "5"]) {
+      const call = readFakeDockerCall(logPath(issue));
+      const worktreePath = expectedWorktreePath(projectRoot, `queue-app-issue-${issue}`);
+      expect(call).toMatchObject({ issue, workingDirectory: worktreePath, unattended: true });
+      expect(call.message).toStartWith(
+        `UNATTENDED QUEUE RUN — issue ${issue}, item ${issue} of 6.`,
+      );
+      expect(call.message).toContain(`\n\nWork issue #${issue}.`);
+      expect(runGit(worktreePath, ["branch", "--show-current"])).toBe(
+        `worktree-queue-app-issue-${issue}`,
+      );
+    }
+    expect(existsSync(expectedWorktreePath(projectRoot, "queue-app-issue-6"))).toBe(false);
+    expect(runGit(projectRoot, ["branch", "--show-current"])).toBe(FIXTURE_DEFAULT_BRANCH);
+  });
+
+  test("--print shows one command per issue and runs nothing", () => {
+    const { projectRoot } = createFixtureProject("queue-print-app");
+    const result = runCli(
+      ["issue-team", "work-issue", "--queue", "7,8", "--max-rounds", "none", "--print"],
+      projectRoot,
+    );
+    expect(result.exitCode).toBe(0);
+    const lines = result.standardOutput
+      .split("\n")
+      .filter((line) => line.includes("docker agent run"));
+    expect(lines).toHaveLength(2);
+    expect(result.standardOutput).toContain("no limit on the number of fix rounds");
+    expect(existsSync(join(projectRoot, ".j5"))).toBe(false);
+  });
+
+  test.each([
+    [["--queue", "1,2"], "missing --max-rounds <n|none> (fix rounds per queue item)"],
+    [
+      ["--queue", "1", "--queue-label", "ready", "--max-rounds", "2"],
+      "--queue and --queue-label are alternatives",
+    ],
+    [
+      ["--queue", "1", "--issue", "2", "--max-rounds", "2"],
+      "--issue runs one item; --queue / --queue-label run several",
+    ],
+    [
+      ["--issue", "2", "--max-rounds", "2"],
+      "--max-rounds only applies with --queue or --queue-label",
+    ],
+    [["--queue", "1,x", "--max-rounds", "2"], "--queue takes comma-separated positive integers"],
+  ])("work-issue %p exits 2 with a specific message", (queueArguments, expectedMessage) => {
+    const { projectRoot } = createFixtureProject("queue-usage-app");
+    const result = runCli(["issue-team", "work-issue", ...queueArguments, "--print"], projectRoot);
+    expect(result.exitCode).toBe(EXIT_CODE_USAGE);
+    expect(result.standardError).toContain(expectedMessage);
+  });
+
+  test("refuses --queue for an entry point without a queue", () => {
+    const { projectRoot } = createFixtureProject("queue-closeout-app");
+    const result = runCli(["issue-team", "closeout", "--queue", "1,2", "--print"], projectRoot);
+    expect(result.exitCode).toBe(EXIT_CODE_USAGE);
+    expect(result.standardError).toContain(
+      "only apply to entry points with a queue; closeout has none",
+    );
   });
 });
 

@@ -27,6 +27,10 @@ const SAMPLE_MANIFEST: WorkflowManifest = {
       parameters: { issue: { type: "integer", label: "Issue" } },
       worktree: { mode: "new", name: "{repo}-issue-{issue}" },
       message: "Work issue #{issue}",
+      queue: {
+        parameter: "issue",
+        preamble: "Queue item {position} of {count} in {repo}: {round_limit}.",
+      },
     },
     "pr-followup": {
       description: "d",
@@ -55,6 +59,7 @@ function buildRequest(overrides: Partial<LaunchRequest>): LaunchRequest {
     effort: undefined,
     baseRef: "origin/main",
     worktree: { state: { kind: "absent" }, pullRequestBranch: undefined },
+    queueItem: undefined,
     passthroughArguments: [],
     inheritedPath: INHERITED_PATH,
     ...overrides,
@@ -253,6 +258,33 @@ describe("buildLaunchPlan — pull request worktree", () => {
     expect(() => buildLaunchPlan(buildRequest(pullRequestRequest))).toThrow(
       "entry point 'pr-followup' needs the PR's branch to create its worktree",
     );
+  });
+});
+
+describe("buildLaunchPlan — queue item", () => {
+  // Catches the preamble going missing or after the prompt: it overrides the prompt's
+  // "ask the user" steps, so the agent must read it first.
+  test("puts the filled preamble before the entry point's message", () => {
+    const plan = buildLaunchPlan(
+      buildRequest({
+        queueItem: { position: 2, count: 3, roundLimitText: "at most 4 fix rounds" },
+      }),
+    );
+    expect(plan.commandWords.at(-1)).toBe(
+      "Queue item 2 of 3 in my-app: at most 4 fix rounds.\n\nWork issue #12",
+    );
+  });
+
+  test("refuses a queue item for an entry point without a queue", () => {
+    expect(() =>
+      buildLaunchPlan(
+        buildRequest({
+          entryPointName: "chat",
+          parameterValues: { topic: "x" },
+          queueItem: { position: 1, count: 1, roundLimitText: "r" },
+        }),
+      ),
+    ).toThrow("entry point 'chat' has no queue");
   });
 });
 
