@@ -125,10 +125,10 @@ permissions:
     - "shell:cmd=*gh release*"
     - "shell:cmd=*sudo *"
 
-# Effort levels, chosen with `daw ... --effort <name>` (docker agent run --flavor <name>).
+# Effort levels, chosen with `j5 ... --effort <name>` (docker agent run --flavor <name>).
 # A flavor is a YAML patch deep-merged over this file. No flavor = the file as written
 # (builder effort high, lead sonnet, review opus).
-# docker-agent ignores an unknown --flavor silently; daw rejects names not listed here.
+# docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
 flavors:
   low:
     models:

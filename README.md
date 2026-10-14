@@ -1,6 +1,8 @@
-# docker-agent-workflows
+# number-5
 
-Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/docker-agent), and `daw`, one launcher for all of them.
+*Need input.*
+
+Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/docker-agent), and `j5`, one launcher for all of them.
 
 | Team | What it does |
 |---|---|
@@ -11,16 +13,16 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), plus whatever each team needs (issue-team: `gh` and `claude` logged in; see its README).
 
 ```bash
-bun scripts/install.ts      # link ~/docker-agent-workflows, add `daw` to your shell, install skills, bun install
+bun scripts/install.ts      # link ~/number-5, add `j5` to your shell, install skills, bun install
 # open a new terminal (bash, zsh, or PowerShell on Windows), then:
-daw list
-cd ~/code/some-repo && daw issue-team work-issue --issue 123
-daw                         # or pick everything interactively
+j5 list
+cd ~/code/some-repo && j5 issue-team work-issue --issue 123
+j5                         # or pick everything interactively
 ```
 
 ## Docs
 
-- [docs/launcher.md](docs/launcher.md) — `daw` options and the `workflow.yaml` manifest
+- [docs/launcher.md](docs/launcher.md) — `j5` options and the `workflow.yaml` manifest
 - [docs/new-team.md](docs/new-team.md) — adding a team or experiment
 - [docs/docker-agent/](docs/README.md) — reference, patterns and gotchas
 

@@ -1,6 +1,6 @@
-// Command-line parsing for `daw`.
+// Command-line parsing for `j5`.
 //
-//   daw [<team> [<entrypoint>]] [--project PATH] [--base REF] [--effort FLAVOR]
+//   j5 [<team> [<entrypoint>]] [--project PATH] [--base REF] [--effort FLAVOR]
 //       [--<parameter> VALUE]... [--print] [--help] [-- <docker agent run flags>...]
 //
 // Hand-rolled instead of node:util parseArgs because the accepted `--<parameter>`
@@ -61,7 +61,7 @@ export function parseArguments(commandLineArguments: string[]): ParsedArguments 
     if (!argument.startsWith(LONG_OPTION_PREFIX)) {
       if (argument.startsWith("-")) {
         throw new Error(
-          `unknown option '${argument}'; docker-agent flags go after '--', e.g. daw issue-team work-issue -- --safety balanced`,
+          `unknown option '${argument}'; docker-agent flags go after '--', e.g. j5 issue-team work-issue -- --safety balanced`,
         );
       }
       parsed.positionals.push(argument);

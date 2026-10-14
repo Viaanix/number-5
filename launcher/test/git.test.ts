@@ -35,7 +35,7 @@ describe("resolveGitToplevel", () => {
   });
 
   test("rejects a path that does not exist", () => {
-    expect(() => resolveGitToplevel("/no/such/daw/path")).toThrow("does not exist");
+    expect(() => resolveGitToplevel("/no/such/j5/path")).toThrow("does not exist");
   });
 });
 

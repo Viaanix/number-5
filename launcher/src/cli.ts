@@ -1,4 +1,4 @@
-// `daw` — the universal launcher for the docker-agent teams in this repository.
+// `j5` — the universal launcher for the docker-agent teams in this repository.
 // It picks a team and entry point, a project checkout, a base branch, an effort
 // (a docker-agent flavor) and the entry point's parameters, from flags or by asking,
 // then runs `docker agent run` with the team's helper scripts on PATH.
@@ -27,6 +27,7 @@ import {
   askToChoose,
   askToConfirm,
   LaunchCancelledError,
+  showBanner,
   showNote,
 } from "./prompts.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
@@ -47,7 +48,7 @@ const LIST_COMMAND = "list";
 // Value of the effort choice that passes no --flavor. Empty because a flavor name never is.
 const TEAM_DEFAULT_EFFORT_CHOICE = "";
 
-/** A mistake in how daw was called; reported with a pointer to --help. */
+/** A mistake in how j5 was called; reported with a pointer to --help. */
 class UsageError extends Error {
   constructor(message: string) {
     super(message);
@@ -72,12 +73,21 @@ function isTerminal(stream: PossiblyTerminalStream): boolean {
   return stream.isTTY === true;
 }
 
+// Johnny 5 flavor lines (Short Circuit, 1986), added on top of the real output and
+// never instead of it: the help, list and prompts must still read plainly without them.
+const HELP_GREETING = "j5 — Number 5 is alive.";
+const LIST_HEADER = "Input! Input!";
+const INTERACTIVE_BANNER = "Need input!";
+const PARAMETER_PROMPT_PREFIX = "Need input:";
+
 function formatUsage(): string {
   return [
+    HELP_GREETING,
+    "",
     "Usage:",
-    "  daw                                    pick everything interactively",
-    `  daw ${LIST_COMMAND}                               teams, entry points, parameters, efforts`,
-    "  daw <team> [<entrypoint>] [options] [--<parameter> <value>]... [-- <docker agent run flags>]",
+    "  j5                                    pick everything interactively",
+    `  j5 ${LIST_COMMAND}                               teams, entry points, parameters, efforts`,
+    "  j5 <team> [<entrypoint>] [options] [--<parameter> <value>]... [-- <docker agent run flags>]",
     "",
     "Options:",
     "  --project <path>   checkout to work on (default: the current directory's git repository)",
@@ -87,8 +97,8 @@ function formatUsage(): string {
     "  --help, -h         this help",
     "",
     "Examples:",
-    "  daw issue-team work-issue --issue 123 --effort low",
-    "  daw issue-team pr-followup --pr 456 --project ~/code/app -- --safety balanced",
+    "  j5 issue-team work-issue --issue 123 --effort low",
+    "  j5 issue-team pr-followup --pr 456 --project ~/code/app -- --safety balanced",
   ].join("\n");
 }
 
@@ -127,7 +137,7 @@ async function chooseTeam(
     return team;
   }
   if (!interaction.canPrompt) {
-    throw new UsageError("name a team, or run daw in a terminal to pick one");
+    throw new UsageError("name a team, or run j5 in a terminal to pick one");
   }
   interaction.askedAnything = true;
   const chosenName = await askToChoose(
@@ -280,8 +290,9 @@ async function collectParameterValues(
       throw new UsageError(`missing --${parameterName} <${parameter.type}> (${parameter.label})`);
     }
     interaction.askedAnything = true;
-    parameterValues[parameterName] = await askForText(parameter.label, (value) =>
-      describeInvalidParameterValue(parameterName, parameter, value),
+    parameterValues[parameterName] = await askForText(
+      `${PARAMETER_PROMPT_PREFIX} ${parameter.label}`,
+      (value) => describeInvalidParameterValue(parameterName, parameter, value),
     );
   }
   return parameterValues;
@@ -337,6 +348,9 @@ async function launch(
     );
   }
 
+  if (interaction.canPrompt && requestedTeamName === undefined) {
+    showBanner(INTERACTIVE_BANNER);
+  }
   const team = await chooseTeam(teams, requestedTeamName, interaction);
   const entryPointName = await chooseEntryPointName(team, requestedEntryPointName, interaction);
   const entryPoint = team.entrypoints[entryPointName];
@@ -416,7 +430,7 @@ async function launch(
       throw new LaunchCancelledError();
     }
   } else {
-    console.error(`daw: ${commandLine}`);
+    console.error(`j5: ${commandLine}`);
   }
   return runPlan(plan);
 }
@@ -433,19 +447,19 @@ async function main(commandLineArguments: string[]): Promise<number> {
       throw new Error(`no team manifests found under ${LAUNCHER_REPOSITORY_ROOT}`);
     }
     if (parsedArguments.positionals[0] === LIST_COMMAND) {
-      console.log(formatTeamList(teams));
+      console.log(`${LIST_HEADER}\n\n${formatTeamList(teams)}`);
       return EXIT_CODE_SUCCESS;
     }
     return await launch(parsedArguments, teams);
   } catch (error) {
     if (error instanceof LaunchCancelledError) {
-      console.error("daw: cancelled, nothing launched");
+      console.error("j5: cancelled, nothing launched");
       return EXIT_CODE_CANCELLED;
     }
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`daw: ${message}`);
+    console.error(`j5: ${message}`);
     if (error instanceof UsageError) {
-      console.error("run 'daw --help' for usage");
+      console.error("run 'j5 --help' for usage");
       return EXIT_CODE_USAGE;
     }
     return EXIT_CODE_FAILURE;

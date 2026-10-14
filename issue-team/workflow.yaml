@@ -1,4 +1,4 @@
-# Launcher manifest for the issue team: how `daw` starts it. docker-agent never reads
+# Launcher manifest for the issue team: how `j5` starts it. docker-agent never reads
 # this file. Schema and rules: launcher/src/manifest.ts and docs/launcher.md.
 # These three entry points replace the shell functions in issue-team.sh one for one.
 name: issue-team

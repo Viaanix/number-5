@@ -20,7 +20,7 @@ Every stage stops for your go-ahead before it publishes anything: push, PR creat
 | Team config | Agents, models, shared toolsets, deny rules | `team.yaml` |
 | Prompts | One instruction file per agent | `instructions/*.md` |
 | Helpers | Deterministic Bun scripts exposed to agents as tools, launched from `PATH` by an `sh` launcher (Linux, macOS) or a `.cmd` (Windows) | `helpers/*.ts`, `bin/` |
-| Entry points | `work-issue`, `pr-followup`, `closeout` | `workflow.yaml` (for `daw`), `issue-team.sh` (shell functions) |
+| Entry points | `work-issue`, `pr-followup`, `closeout` | `workflow.yaml` (for `j5`), `issue-team.sh` (shell functions) |
 | Effort levels | `low` flavor: haiku lead, sonnet review, builder effort low | `team.yaml` → `flavors` |
 | Builder | Claude Code harness (`claude` CLI, your Claude subscription login) | `harness: claude-code` |
 | Models | `lead` = `anthropic/claude-sonnet-5`, `review` = `anthropic/claude-opus-5` | `team.yaml` → `models` |
@@ -63,7 +63,7 @@ Nothing in this directory names an absolute path. `team.yaml` resolves `instruct
 1. Prerequisites: Docker with the `docker agent` plugin, `gh` (logged in), `claude` (logged in), `git`, and [Bun](https://bun.sh): the helpers in `bin/` run with it whenever an agent calls a tool.
 2. The `j5-test-quality` skill at `~/.agents/skills/j5-test-quality/`, which `bun scripts/install.ts` copies there from `skills/`. The tester and reviewer read its workflow files from that path; the tester's `test_prescreen` tool runs the repository's own copy of its pre-screen.
 3. Anthropic API key for the native agents. `docker agent setup` → Anthropic, or set `ANTHROPIC_API_KEY` in `~/.config/cagent/.env`. The builder uses your Claude login instead.
-4. Optional, bash and zsh only (`daw` replaces this on every OS): shell functions and helpers, in `~/.bashrc` (use wherever you cloned this directory):
+4. Optional, bash and zsh only (`j5` replaces this on every OS): shell functions and helpers, in `~/.bashrc` (use wherever you cloned this directory):
    ```bash
    source ~/team/issue-team.sh
    ```
@@ -83,13 +83,13 @@ Nothing in this directory names an absolute path. `team.yaml` resolves `instruct
 
 ### With the launcher
 
-The repository's `daw` launcher ([docs/launcher.md](../docs/launcher.md)) runs the same three stages without sourcing `issue-team.sh`, and puts `bin/` on `PATH` itself:
+The repository's `j5` launcher ([docs/launcher.md](../docs/launcher.md)) runs the same three stages without sourcing `issue-team.sh`, and puts `bin/` on `PATH` itself:
 
 ```bash
-daw issue-team work-issue --issue 123 [--project <path>] [--base <ref>] [--effort low]
-daw issue-team pr-followup --pr 456
-daw issue-team closeout --pr 456
-daw issue-team work-issue --issue 123 --print     # show the docker agent command only
+j5 issue-team work-issue --issue 123 [--project <path>] [--base <ref>] [--effort low]
+j5 issue-team pr-followup --pr 456
+j5 issue-team closeout --pr 456
+j5 issue-team work-issue --issue 123 --print     # show the docker agent command only
 ```
 
 ### With the shell functions
