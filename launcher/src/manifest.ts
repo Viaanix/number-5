@@ -11,7 +11,7 @@ import { z } from "zod";
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "./arguments.ts";
 import { extractPlaceholderNames } from "./template.ts";
 
-/** File name the launcher looks for in each top-level directory of this repository. */
+/** File name the launcher looks for in each team directory under workflows/. */
 export const MANIFEST_FILE_NAME = "workflow.yaml";
 
 /** Placeholder every template may use: the basename of the project's git toplevel. */

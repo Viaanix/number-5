@@ -32,9 +32,9 @@ import {
 } from "./prompts.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
-import { discoverTeams } from "./teams.ts";
+import { discoverTeams, resolveTeamsDirectory } from "./teams.ts";
 
-// This file lives at <repository>/launcher/src/cli.ts; teams are top-level directories.
+// This file lives at <repository>/launcher/src/cli.ts; teams live under <repository>/workflows/.
 const LAUNCHER_REPOSITORY_ROOT = resolve(import.meta.dir, "..", "..");
 
 const EXIT_CODE_SUCCESS = 0;
@@ -112,10 +112,13 @@ function formatTeamList(teams: WorkflowManifest[]): string {
   const sections = teams.map((team) => {
     const { flavorNames } = readTeamConfigSummary(team.teamConfigPath);
     const efforts = flavorNames.length === 0 ? "none (team defaults only)" : flavorNames.join(", ");
-    const entryPointLines = Object.entries(team.entrypoints).map(
-      ([entryPointName, entryPoint]) =>
-        `  ${entryPointName} ${describeEntryPointParameters(entryPoint)}\n      ${entryPoint.description}`,
-    );
+    const entryPointLines = Object.entries(team.entrypoints).map(([entryPointName, entryPoint]) => {
+      // An entry point without parameters gets no separator, so no trailing space.
+      const usage = [entryPointName, describeEntryPointParameters(entryPoint)]
+        .filter((part) => part !== "")
+        .join(" ");
+      return `  ${usage}\n      ${entryPoint.description}`;
+    });
     return [`${team.name} — ${team.description}`, ...entryPointLines, `  efforts: ${efforts}`].join(
       "\n",
     );
@@ -444,7 +447,9 @@ async function main(commandLineArguments: string[]): Promise<number> {
     }
     const teams = discoverTeams(LAUNCHER_REPOSITORY_ROOT);
     if (teams.length === 0) {
-      throw new Error(`no team manifests found under ${LAUNCHER_REPOSITORY_ROOT}`);
+      throw new Error(
+        `no team manifests found under ${resolveTeamsDirectory(LAUNCHER_REPOSITORY_ROOT)}`,
+      );
     }
     if (parsedArguments.positionals[0] === LIST_COMMAND) {
       console.log(`${LIST_HEADER}\n\n${formatTeamList(teams)}`);

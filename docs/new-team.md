@@ -1,11 +1,11 @@
 # Adding a team or an experiment
 
-A team is a top-level directory. Copying `issue-team/` and cutting it down is usually faster than starting empty.
+A team is a directory under `workflows/`. Copying `workflows/issue-team/` and cutting it down is usually faster than starting empty.
 
 ## Layout
 
 ```
-my-team/
+workflows/my-team/
   team.yaml           docker-agent config: models, agents, toolsets, permissions, flavors
   workflow.yaml       launcher manifest: entry points, parameters, worktree mode, first message
   instructions/       one <agent>.md per agent (instruction_file)
@@ -16,9 +16,9 @@ my-team/
 
 ## Steps
 
-1. **Write `team.yaml`.** Start from the patterns in [docker-agent/patterns.md](docker-agent/patterns.md). Check it parses: `docker agent debug config my-team/team.yaml`.
+1. **Write `team.yaml`.** Start from the patterns in [docker-agent/patterns.md](docker-agent/patterns.md). Check it parses: `docker agent debug config workflows/my-team/team.yaml`.
 2. **Write `instructions/<agent>.md`** for each agent: the procedure, what every task message carries, the output format, and the rules (what it must never do).
-3. **Move anything deterministic into a helper** and expose it as a `type: script` tool with a bare `cmd:` (the helper reads its arguments from the environment). Write it as `helpers/<verb>.ts` and copy a launcher pair from `issue-team/bin/` as `bin/<team>-<verb>` and `bin/<team>-<verb>.cmd`. The `<team>-` prefix keeps two teams' helpers from shadowing each other on `PATH`. See [patterns](docker-agent/patterns.md#helpers-that-run-on-every-os).
+3. **Move anything deterministic into a helper** and expose it as a `type: script` tool with a bare `cmd:` (the helper reads its arguments from the environment). Write it as `helpers/<verb>.ts`, using `runHelper` and `readToolArgument` from `launcher/src/team-helper.ts`; logic another team already has (the change diff, the test pre-screen) is a function in `launcher/src/` to call, not code to copy. Copy a launcher pair from `workflows/issue-team/bin/` as `bin/<team>-<verb>` and `bin/<team>-<verb>.cmd`. The `<team>-` prefix keeps two teams' helpers from shadowing each other on `PATH`. Never name a tool argument `path`: arguments reach the helper as environment variables, and on Windows `path` is `PATH`. See [patterns](docker-agent/patterns.md#helpers-that-run-on-every-os).
 4. **Define effort levels** as `flavors:` if the team should have any. Keep each flavor to the keys it changes.
 5. **Write `workflow.yaml`** ([schema](launcher.md#the-manifest-teamworkflowyaml)) with one entry point per way of starting the team.
 6. **Check it:**
@@ -33,4 +33,4 @@ my-team/
 
 ## Experiments
 
-An experiment that is not ready to be a team can live in its own top-level directory **without** a `workflow.yaml`; the launcher and `validate:teams` ignore it. Add the manifest when it should be launchable. Record what the experiment taught you in `docs/`, whether or not it survives.
+An experiment that is not ready to be a team can live in its own directory under `workflows/` **without** a `workflow.yaml`; the launcher and `validate:teams` ignore it. Add the manifest when it should be launchable. Record what the experiment taught you in `docs/`, whether or not it survives.

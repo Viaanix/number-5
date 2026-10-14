@@ -1,0 +1,4 @@
+#!/bin/sh
+# test-quality-change-diff for Linux and macOS: runs helpers/change-diff.ts with Bun. The Windows
+# launcher is test-quality-change-diff.cmd; docker-agent's script tools call either by bare name.
+exec bun "$(dirname "$0")/../helpers/change-diff.ts" "$@"

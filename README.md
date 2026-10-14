@@ -6,7 +6,8 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 | Team | What it does |
 |---|---|
-| [issue-team](issue-team/README.md) | GitHub issue → pull request → review follow-up → post-merge closeout, in any repository |
+| [issue-team](workflows/issue-team/README.md) | GitHub issue → pull request → review follow-up → post-merge closeout, in any repository |
+| [test-quality](workflows/test-quality/README.md) | Audit, review, write or fix tests with the `j5-test-quality` skill, in the current checkout |
 
 ## Quick start
 

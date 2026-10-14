@@ -83,7 +83,7 @@ Nothing in this directory names an absolute path. `team.yaml` resolves `instruct
 
 ### With the launcher
 
-The repository's `j5` launcher ([docs/launcher.md](../docs/launcher.md)) runs the same three stages without sourcing `issue-team.sh`, and puts `bin/` on `PATH` itself:
+The repository's `j5` launcher ([docs/launcher.md](../../docs/launcher.md)) runs the same three stages without sourcing `issue-team.sh`, and puts `bin/` on `PATH` itself:
 
 ```bash
 j5 issue-team work-issue --issue 123 [--project <path>] [--base <ref>] [--effort low]

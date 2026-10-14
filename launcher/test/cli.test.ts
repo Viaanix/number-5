@@ -24,7 +24,7 @@ afterAll(removeTemporaryDirectories);
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, "..", "..");
 const CLI_PATH = join(REPOSITORY_ROOT, "launcher", "src", "cli.ts");
-const ISSUE_TEAM_DIRECTORY = join(REPOSITORY_ROOT, "issue-team");
+const ISSUE_TEAM_DIRECTORY = join(REPOSITORY_ROOT, "workflows", "issue-team");
 const ISSUE_TEAM_CONFIG = join(ISSUE_TEAM_DIRECTORY, "team.yaml");
 const ISSUE_TEAM_BIN = join(ISSUE_TEAM_DIRECTORY, "bin");
 const EXIT_CODE_USAGE = 2;
@@ -318,6 +318,13 @@ describe("j5 list and help", () => {
     expect(result.standardOutput).toContain("  pr-followup --pr <integer>");
     expect(result.standardOutput).toContain("  closeout --pr <integer>");
     expect(result.standardOutput).toContain("  efforts: low");
+  });
+
+  // Catches the usage line of a parameterless entry point ending in a space, which
+  // the separator before the (empty) parameter list used to add.
+  test("list shows a parameterless entry point as its bare name", () => {
+    const result = runCli(["list"], createTemporaryDirectory());
+    expect(result.standardOutput).toContain("\n  review-branch\n");
   });
 
   test("help opens with the greeting, then the usage", () => {

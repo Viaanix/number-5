@@ -4,7 +4,9 @@
 
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+
+import { readPathValue, withPathValue } from "../src/environment.ts";
 
 const TEMPORARY_DIRECTORY_PREFIX = "j5-test-";
 
@@ -111,11 +113,74 @@ export function buildTeamYaml(flavorNames: string[]): string {
 /**
  * Puts a fake command on disk that runs a Bun script: an extensionless sh launcher
  * for Linux and macOS and a .cmd launcher that Windows finds through PATHEXT, the
- * same pair the team helpers in issue-team/bin use. Prepend the directory to PATH.
+ * same pair the team helpers in workflows/issue-team/bin use. Prepend the directory to PATH.
  */
 export function writeFakeCommand(directory: string, commandName: string, scriptPath: string): void {
   const posixLauncherPath = join(directory, commandName);
   writeFileSync(posixLauncherPath, `#!/bin/sh\nexec bun "${scriptPath}" "$@"\n`);
   chmodSync(posixLauncherPath, 0o755);
   writeFileSync(join(directory, `${commandName}.cmd`), `@bun "${scriptPath}" %*\r\n`);
+}
+
+/** What a team helper printed and how it exited. */
+export type HelperResult = { exitCode: number; standardOutput: string; standardError: string };
+
+/** Runs a team helper's Bun script directly: `bun <scriptPath> <helperArguments>`. */
+export function runHelperScriptFile(
+  scriptPath: string,
+  helperArguments: string[],
+  workingDirectory: string,
+  extraEnvironment: Record<string, string> = {},
+): HelperResult {
+  const completedProcess = Bun.spawnSync(["bun", scriptPath, ...helperArguments], {
+    cwd: workingDirectory,
+    stdin: "ignore",
+    env: { ...process.env, ...extraEnvironment },
+  });
+  return {
+    exitCode: completedProcess.exitCode,
+    standardOutput: completedProcess.stdout.toString(),
+    standardError: completedProcess.stderr.toString(),
+  };
+}
+
+/**
+ * The shells docker-agent v1.145.0 runs script tools with: $SHELL -c on Unix
+ * (sh here, the strictest), PowerShell -Command or cmd.exe /C on Windows. Each
+ * call names the helper bare, with arguments only in the environment.
+ */
+export const DOCKER_AGENT_SHELLS: Array<{ shellName: string; commandPrefix: string[] }> =
+  process.platform === "win32"
+    ? [
+        { shellName: "pwsh", commandPrefix: ["pwsh", "-NoProfile", "-NonInteractive", "-Command"] },
+        { shellName: "cmd", commandPrefix: ["cmd.exe", "/d", "/c"] },
+      ]
+    : [{ shellName: "sh", commandPrefix: ["sh", "-c"] }];
+
+/**
+ * Runs a command line through one of DOCKER_AGENT_SHELLS with a team's bin/ first
+ * on PATH, the way a docker-agent script tool calls a helper by bare name.
+ * Windows line endings in stdout are normalized to "\n".
+ */
+export function runThroughDockerAgentShell(
+  commandPrefix: string[],
+  teamBinDirectory: string,
+  command: string,
+  workingDirectory: string,
+  extraEnvironment: Record<string, string> = {},
+): HelperResult {
+  const environment = withPathValue(
+    { ...process.env, ...extraEnvironment },
+    `${teamBinDirectory}${delimiter}${readPathValue(process.env)}`,
+  );
+  const completedProcess = Bun.spawnSync([...commandPrefix, command], {
+    cwd: workingDirectory,
+    stdin: "ignore",
+    env: environment,
+  });
+  return {
+    exitCode: completedProcess.exitCode,
+    standardOutput: completedProcess.stdout.toString().replaceAll("\r\n", "\n"),
+    standardError: completedProcess.stderr.toString(),
+  };
 }

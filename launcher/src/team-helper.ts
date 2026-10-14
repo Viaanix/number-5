@@ -1,7 +1,9 @@
-// Shared plumbing for the issue-team helpers (bin/issue-team-*). Each helper is a
-// Bun script started by a two-line launcher in bin/: an extensionless sh file for
-// Linux and macOS, and a .cmd for Windows. That is what lets docker-agent's script
-// tools call them by bare name from bash, zsh, PowerShell or cmd.exe alike.
+// Shared plumbing for every team's helpers (workflows/<team>/helpers/*.ts). It lives
+// here rather than in one team so no team imports from another. Each helper is a
+// Bun script started by a two-line launcher in the team's bin/: an extensionless sh
+// file for Linux and macOS, and a .cmd for Windows. That is what lets docker-agent's
+// script tools call them by bare name from bash, zsh, PowerShell or cmd.exe alike.
+// The j5 launcher itself does not use this file.
 
 const SUCCESS_EXIT_CODE = 0;
 

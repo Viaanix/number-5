@@ -1,0 +1,45 @@
+# Launcher manifest for the test-quality team: how `j5` starts it. docker-agent never
+# reads this file. Schema and rules: launcher/src/manifest.ts and docs/launcher.md.
+# One entry point per j5-test-quality workflow. All of them run in the project checkout
+# itself (worktree mode none): the tests to audit, review, extend or fix are the ones
+# on the branch you have checked out, which a fresh worktree from the base would not have.
+name: test-quality
+description: Audit, review, write or fix tests with the j5-test-quality skill, in the current checkout
+team: team.yaml
+# The script tools in team.yaml call these helpers by name.
+path: [bin]
+
+entrypoints:
+  audit:
+    description: Read-only audit of a test suite at scale; writes a report under .j5/review/
+    agent: auditor
+    parameters:
+      target: { type: string, label: "Test file or directory to audit, relative to the project root" }
+    worktree:
+      mode: none
+    message: "Audit the tests under {target}."
+
+  review-branch:
+    description: Read-only review of the tests added or changed on the current branch
+    agent: reviewer
+    worktree:
+      mode: none
+    message: "Review the tests added or changed on this branch."
+
+  write-tests:
+    description: Write tests that catch real bugs for a file, function or behavior; edits only tests
+    agent: writer
+    parameters:
+      target: { type: string, label: "What to test (a file, function or behavior)" }
+    worktree:
+      mode: none
+    message: "Write tests for {target}."
+
+  fix-failing:
+    description: Find why a test fails and fix the cause; the code is assumed wrong, not the test
+    agent: fixer
+    parameters:
+      test: { type: string, label: "The failing test (file, test name or failing command)" }
+    worktree:
+      mode: none
+    message: "This test fails: {test}. Find out why and fix the cause."

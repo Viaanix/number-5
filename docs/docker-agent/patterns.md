@@ -1,6 +1,6 @@
 # docker-agent team patterns
 
-Patterns that the teams in this repository use on purpose. Each one names the problem it solves and where to see it. `issue-team/` is the reference implementation; read its `team.yaml` and `instructions/` alongside this page.
+Patterns that the teams in this repository use on purpose. Each one names the problem it solves and where to see it. `workflows/issue-team/` is the reference implementation; read its `team.yaml` and `instructions/` alongside this page.
 
 Add a pattern when a second team uses it, or when a team uses it to fix a failure you saw. Say which failure.
 
@@ -30,7 +30,7 @@ The reviewer answers in an exact template (`VERDICT: ...`, then fixed sections, 
 Anything with a right answer — the default branch, the change diff, unresolved PR threads — is a helper in the team, exposed as a typed script tool (`args`, `required`, a description of the output). Agents call `change_diff`, not a hand-assembled `git diff` they might get wrong. The helpers are called by name, so the team's `bin/` must be on `PATH` (the launcher does this).
 
 ### Helpers that run on every OS
-A helper is a Bun script (`helpers/<verb>.ts`) with two launchers in `bin/`: an extensionless `#!/bin/sh` file and a `.cmd` that Windows finds through PATHEXT. The script tool's `cmd:` is the bare name, and the helper reads its arguments from the environment, where docker-agent puts them. `cmd: helper "$pr"` only works under bash and zsh; PowerShell and cmd.exe spell variables differently ([gotcha](gotchas.md#the-shell-tool-and-script-tools-use-the-users-shell-not-bash)). See `issue-team/helpers/` and `issue-team/bin/`.
+A helper is a Bun script (`helpers/<verb>.ts`) with two launchers in `bin/`: an extensionless `#!/bin/sh` file and a `.cmd` that Windows finds through PATHEXT. The script tool's `cmd:` is the bare name, and the helper reads its arguments from the environment, where docker-agent puts them. `cmd: helper "$pr"` only works under bash and zsh; PowerShell and cmd.exe spell variables differently ([gotcha](gotchas.md#the-shell-tool-and-script-tools-use-the-users-shell-not-bash)). See `workflows/issue-team/helpers/` and `workflows/issue-team/bin/`. Logic two teams need lives once in `launcher/src/` (`team-helper.ts`, `change-diff.ts`, `test-prescreen.ts`), and each team's helper is a thin wrapper with its own `<team>-` name.
 
 ### Shared toolsets
 A script toolset defined once under top-level `toolsets:` and attached with `use_toolsets: [name]` (see `pr_threads`), instead of copying the definition into each agent.

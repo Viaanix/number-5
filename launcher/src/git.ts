@@ -56,7 +56,7 @@ export function readOriginUrl(repositoryRoot: string): string | undefined {
 /**
  * Returns the remote default branch as a remote-tracking ref, e.g. `origin/main`.
  * Uses origin/HEAD when the clone has it, otherwise asks GitHub (some clones never set it).
- * Same lookup as issue-team/bin/issue-team-base-ref, which agents call by name inside a run.
+ * Same lookup as workflows/issue-team/bin/issue-team-base-ref, which agents call by name inside a run.
  * @throws Error when neither source answers.
  */
 export function resolveDefaultBranchRef(repositoryRoot: string): string {

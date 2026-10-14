@@ -1,0 +1,4 @@
+#!/bin/sh
+# test-quality-prescreen for Linux and macOS: runs helpers/prescreen.ts with Bun. The Windows
+# launcher is test-quality-prescreen.cmd; docker-agent's script tools call either by bare name.
+exec bun "$(dirname "$0")/../helpers/prescreen.ts" "$@"

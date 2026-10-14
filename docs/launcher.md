@@ -53,12 +53,12 @@ The base-branch list shows remote branches as of your last `git fetch`. docker-a
 `j5 issue-team work-issue --issue 12 --effort low --print`, inside a clone named `my-app`:
 
 ```bash
-cd /path/to/my-app && PATH=<repo>/issue-team/bin:"$PATH" docker agent run <repo>/issue-team/team.yaml --agent root --flavor low --worktree=my-app-issue-12 --worktree-base origin/main 'Work issue #12'
+cd /path/to/my-app && PATH=<repo>/workflows/issue-team/bin:"$PATH" docker agent run <repo>/workflows/issue-team/team.yaml --agent root --flavor low --worktree=my-app-issue-12 --worktree-base origin/main 'Work issue #12'
 ```
 
-## The manifest: `<team>/workflow.yaml`
+## The manifest: `workflows/<team>/workflow.yaml`
 
-A top-level directory with a `workflow.yaml` is a team; there is no registry. docker-agent never reads this file.
+A directory under `workflows/` with a `workflow.yaml` is a team; there is no registry. Top-level directories are never teams. docker-agent never reads this file.
 
 ```yaml
 name: issue-team                 # what you type after j5; unique

@@ -1,17 +1,23 @@
-// issue-team-change-diff [since]: prints the change under review — the commits on
-// this branch since it left the remote default branch with their full diff, then
-// any uncommitted or untracked work. With `since` (the last reviewed HEAD), the
-// commits added after it come first as the review scope, and the full change
-// follows as context. `since` comes from the command line or the environment
-// (docker-agent's change_diff tool sets it as an environment variable).
+// The change under review, as one text block: the commits on the current branch
+// since it left the remote default branch with their full diff, then any
+// uncommitted or untracked work. With `since` (the last reviewed HEAD), the commits
+// added after it come first as the review scope, and the full change follows as
+// context. Shared by every team's change-diff helper (workflows/<team>/helpers/),
+// which docker-agent's change_diff script tools call in the project checkout.
 
-import { resolveDefaultBranchRef } from "../../launcher/src/git.ts";
-import { readToolArgument, runAndCapture, runHelper, succeeds } from "./command.ts";
+import { resolveDefaultBranchRef } from "./git.ts";
+import { runAndCapture, succeeds } from "./team-helper.ts";
 
 // An abbreviated or full commit SHA.
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/;
 
-runHelper("issue-team-change-diff", () => {
+/**
+ * Builds the change report for the repository in the current directory.
+ * A `since` that is not a commit in HEAD's history falls back to the full change,
+ * and the first line says so.
+ * @throws Error when the default branch cannot be found or a git command fails.
+ */
+export function formatChangeDiff(requestedSince: string | undefined): string {
   const output: string[] = [];
   const write = (text: string): void => {
     output.push(text);
@@ -19,7 +25,7 @@ runHelper("issue-team-change-diff", () => {
 
   const baseRef = resolveDefaultBranchRef(process.cwd());
   const mergeBase = runAndCapture(["git", "merge-base", "HEAD", baseRef]).trim();
-  let since = readToolArgument("since");
+  let since = requestedSince;
 
   if (
     since !== undefined &&
@@ -60,5 +66,5 @@ runHelper("issue-team-change-diff", () => {
     write(runAndCapture(["git", "diff", "HEAD"]));
   }
 
-  process.stdout.write(output.join(""));
-});
+  return output.join("");
+}

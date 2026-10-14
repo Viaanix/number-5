@@ -57,7 +57,7 @@ What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 
 **Receipt:**
 ```bash
-docker agent run issue-team/team.yaml --agent closer --dry-run --exec x
+docker agent run workflows/issue-team/team.yaml --agent closer --dry-run --exec x
 # → Dry run mode enabled. Agent initialized but will not execute.   (exit 0; there is no agent "closer")
 ```
 
@@ -79,15 +79,37 @@ docker agent run issue-team/team.yaml --agent closer --dry-run --exec x
 
 **Receipt:**
 ```bash
-env -u ANTHROPIC_API_KEY docker agent run issue-team/team.yaml --config-dir <empty dir> --dry-run --exec x
+env -u ANTHROPIC_API_KEY docker agent run workflows/issue-team/team.yaml --config-dir <empty dir> --dry-run --exec x
 # → "Welcome to docker agent!" setup flow, exit 255 (in CI: "The following environment variables must be set: ANTHROPIC_API_KEY")
-ANTHROPIC_API_KEY=placeholder docker agent run issue-team/team.yaml --config-dir <empty dir> --dry-run --exec x
+ANTHROPIC_API_KEY=placeholder docker agent run workflows/issue-team/team.yaml --config-dir <empty dir> --dry-run --exec x
 # → Dry run mode enabled. Agent initialized but will not execute.   (exit 0)
 ```
 
 **Consequence:** a dry run checks that the key is present, not that it is valid. CI needs a value even though no model is called.
 
 **Mitigation:** `.github/workflows/check.yml` sets a placeholder `ANTHROPIC_API_KEY` for `bun run check`.
+
+### `doctor` reports a credential as found when it is only set
+
+**Observed:** v1.145.0, 2026-10-14.
+
+**Receipt:** with `ANTHROPIC_API_KEY` set to a one-character value in `~/.config/cagent/.env` and unset in the shell, `docker agent doctor <team.yaml>` lists `anthropic  found  ANTHROPIC_API_KEY  config-env-file`. The same setup makes `--dry-run` exit 0, and a real `docker agent run … --exec` fails at the first model call:
+```
+model failed: error receiving from stream: Post "https://api.anthropic.com/v1/messages": net/http: invalid header field value for "X-Api-Key"
+exit 1
+```
+
+**Consequence:** neither `doctor` nor a dry run (nor `validate:teams`) proves the key works. Only a real run does.
+
+### A `harness: claude-code` agent gets none of docker-agent's agent extras
+
+**Observed:** v1.145.0 with Claude Code 2.1.284, 2026-10-14.
+
+**Receipt:** an agent with `harness: { type: claude-code, effort: low }` plus `instruction_file` (telling it to say a marker word first), a `type: script` tool `probe_tool` and `skills: [j5-test-quality]`. `debug config` accepts it and `debug toolsets` lists `probe_tool` and `read_skill`. A real `docker agent run full.yaml --exec` asked about all three answered `NONE` / `no` / `no`: no instruction, no script tool, no `read_skill`. (The agent's own report; consistent with the builder's tools in `workflows/issue-team/README.md`.)
+
+**Consequence:** for a harness agent the task message is the only channel docker-agent provides. Prompts, tools and skills declared in `team.yaml` are silently dropped, and neither `debug` nor a dry run shows it.
+
+**What does reach it:** the docker-agent process's `PATH`. With a team's `bin/` prepended (as `j5` does), the harness ran `test-quality-prescreen` by bare name through its own shell tool and got the helper's real output and exit code.
 
 ### `debug config` is the canonical-config printer
 
@@ -99,7 +121,7 @@ ANTHROPIC_API_KEY=placeholder docker agent run issue-team/team.yaml --config-dir
 
 **Observed:** v1.145.0, 2026-10-14.
 
-**Receipt:** `docker agent debug skills issue-team/team.yaml` lists `+ test-quality-with-ai - |` for tester and reviewer; the skill's frontmatter has `description: |` followed by an indented block.
+**Receipt:** `docker agent debug skills workflows/issue-team/team.yaml` lists `+ test-quality-with-ai - |` for tester and reviewer; the skill's frontmatter has `description: |` followed by an indented block.
 
 **Consequence:** the skill is never matched from its description. Agents that need it must name it explicitly. Write skill descriptions as one-line scalars.
 
@@ -115,7 +137,7 @@ ANTHROPIC_API_KEY=placeholder docker agent run issue-team/team.yaml --config-dir
 
 **Observed:** v1.145.0, 2026-10-14.
 
-**Receipt:** with `skills: [j5-test-quality]` in `issue-team/team.yaml` and no `~/.agents/skills/j5-test-quality`, `docker agent debug skills issue-team/team.yaml` prints `No skills for tester` / `No skills for reviewer` and exits 0; `docker agent run ... --agent tester --dry-run --exec` also exits 0.
+**Receipt:** with `skills: [j5-test-quality]` in `workflows/issue-team/team.yaml` and no `~/.agents/skills/j5-test-quality`, `docker agent debug skills workflows/issue-team/team.yaml` prints `No skills for tester` / `No skills for reviewer` and exits 0; `docker agent run ... --agent tester --dry-run --exec` also exits 0.
 
 **Consequence:** an agent whose instructions depend on a skill runs without it, and neither a dry run nor `validate:teams` notices.
 
@@ -147,7 +169,7 @@ The data directory, and with it `worktrees/`, is `<home>/.cagent` on every OS (`
 
 ## Unverified
 
-Carried over from `issue-team/README.md` ("Known limits") or reported without a receipt in this repository. Confirm one with a receipt, then move it up.
+Carried over from `workflows/issue-team/README.md` ("Known limits") or reported without a receipt in this repository. Confirm one with a receipt, then move it up.
 
 - **The docs on docker.github.io track `main`**, not the release, and document flags v1.145.0 lacks (e.g. `--last`). Trust `docker agent <command> --help` over the website.
 - **PR worktrees are named `pr-<number>`** without the repository name, so the same PR number in two repositories collides under `~/.cagent/worktrees/`. `j5` refuses a `pr-<n>` worktree whose `origin` is another repository.
@@ -155,3 +177,4 @@ Carried over from `issue-team/README.md` ("Known limits") or reported without a 
 - **`permissions.deny` rules cover docker-agent's own shell tool only.** A `harness: claude-code` agent runs Claude Code's tools, outside those rules.
 - **Script tools resolve commands through the docker-agent process's `PATH`.** A helper that is not on `PATH` fails with "command not found" at call time, not at startup. `j5` prepends each team's `path:` directories.
 - **`--worktree`, `--worktree-pr` and `--sandbox` cannot be combined.**
+- **A script-tool argument named `path` would replace `PATH` on Windows.** Inferred, not run: docker-agent passes script-tool arguments as environment variables (`script_shell.go`), and Windows environment variable names are case-insensitive. The teams here avoid the name (`test_prescreen` takes `target`).
