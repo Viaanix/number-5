@@ -15,39 +15,48 @@
 #   - the helpers in bin/ are called through Claude Code's shell by bare name;
 #   - the publish gates and the "never force-push / merge" rules are instructions only.
 # Per-repository context comes from that repository's CLAUDE.md, which Claude Code reads.
+# `harness.model` picks the agent's Claude model (verified: a run with claude-haiku-4-5
+# shows that model in Claude Code's transcript). Without it, Claude Code uses the user's
+# own default model, which is not this repository's to decide.
 
 agents:
   root:
     description: Owns one GitHub issue from a fresh worktree to an opened pull request
     harness:
       type: claude-code
+      model: claude-sonnet-5-5
       effort: high
 
   followup:
     description: Resolves review threads and failing checks on an existing pull request branch
     harness:
       type: claude-code
+      model: claude-sonnet-5-5
       effort: high
 
   closeout:
     description: After a pull request merges, verifies the default branch, files issues for its open review threads, and closes the linked issues with evidence
     harness:
       type: claude-code
+      model: claude-sonnet-5-5
       effort: high
 
 # Effort levels, chosen with `j5 issue-team ... --effort <name>` (docker agent run
 # --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
-# the file as written (every agent at effort high).
+# the file as written (every agent on Sonnet 5.5 at effort high).
 # docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
 flavors:
   low:
     agents:
       root:
         harness:
+          model: claude-haiku-4-5
           effort: low
       followup:
         harness:
+          model: claude-haiku-4-5
           effort: low
       closeout:
         harness:
+          model: claude-haiku-4-5
           effort: low

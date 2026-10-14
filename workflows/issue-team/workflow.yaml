@@ -31,7 +31,7 @@ entrypoints:
       Three sub-agents, each started with your sub-agent tool. None of them sees this conversation, so every task you send must carry everything it needs:
       - builder — implements code changes. Its task carries the rules in step 3.
       - tester — writes and audits tests, runs suites, never edits production code. Begin its task with the full output of `issue-team-role tester` (a helper on PATH), then the task.
-      - reviewer — independent, read-only review of the whole branch. Begin its task with the full output of `issue-team-role reviewer`, then the task.
+      - reviewer — independent, read-only review of the whole branch. Start it on the Opus model (your sub-agent tool's model option), and begin its task with the full output of `issue-team-role reviewer`, then the task.
 
       You coordinate, commit, and publish. Do not write production code or tests yourself.
 
@@ -96,7 +96,7 @@ entrypoints:
       Three sub-agents, each started with your sub-agent tool. None of them sees this conversation, so every task must be self-contained:
       - builder — implements code changes.
       - tester — writes and audits tests, runs suites. Begin its task with the full output of `issue-team-role tester` (a helper on PATH), then the task.
-      - reviewer — independent, read-only review of the whole branch. Begin its task with the full output of `issue-team-role reviewer`, then the task.
+      - reviewer — independent, read-only review of the whole branch. Start it on the Opus model (your sub-agent tool's model option), and begin its task with the full output of `issue-team-role reviewer`, then the task.
 
       You coordinate, commit, push and reply. Do not write code yourself.
 

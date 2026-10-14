@@ -113,6 +113,8 @@ exit 1
 
 The conversation does carry over: two `--exec` turns of one harness agent with the same `--session <id>` (and `-s <scratch session.db>`); turn 1 "Remember the word KIWI", turn 2 "Which word …?" answered `KIWI`. An agent that stops to ask the user can be answered in a later turn.
 
+**`harness.model` does apply.** With `harness: { type: claude-code, model: claude-haiku-4-5 }` the run's Claude Code transcript (`~/.claude/projects/<cwd>/*.jsonl`) records `claude-haiku-4-5-20251001`; without it, the user's own Claude Code default (`claude-opus-5-5` here). Checked on the real team files too: issue-team `root` → `claude-sonnet-5-5`; test-quality `writer --flavor low` → `claude-haiku-4-5-20251001` (2026-10-14). A model not set in `team.yaml` is whatever the user's Claude Code is set to.
+
 **What does reach it:** the docker-agent process's `PATH`. With a team's `bin/` prepended (as `j5` does), the harness ran `test-quality-prescreen` by bare name through its own shell tool and got the helper's real output and exit code.
 
 ### `--worktree` does not move a harness agent into the worktree

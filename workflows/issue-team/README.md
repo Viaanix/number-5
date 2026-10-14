@@ -17,11 +17,11 @@ flowchart LR
 | Layer | What | Where |
 |---|---|---|
 | Runtime | docker-agent v1.145.0 (`docker agent`) | Docker CLI plugin |
-| Agents | Three Claude Code harness agents, one per entry point, and the effort levels | `team.yaml` |
+| Agents | Three Claude Code harness agents, one per entry point, on Sonnet 5.5 (`harness.model`); `root` and `followup` start their reviewer sub-agent on Opus | `team.yaml`, `workflow.yaml` |
 | Entry prompts | Each entry agent's whole prompt is its entry point's `message` | `workflow.yaml` (for `j5`) |
 | Sub-agent roles | Tester and reviewer prompts, printed by `issue-team-role <role>` | `roles/*.md` |
 | Helpers | Deterministic Bun scripts the agents run by bare name, launched from `PATH` by an `sh` launcher (Linux, macOS) or a `.cmd` (Windows) | `helpers/*.ts`, `bin/` |
-| Effort levels | `low` flavor: every agent at harness effort low | `team.yaml` → `flavors` |
+| Effort levels | `low` flavor: every agent on Haiku 4.5 at harness effort low | `team.yaml` → `flavors` |
 | Test discipline | `j5-test-quality` skill, read by path, and `issue-team-test-prescreen` | `skills/j5-test-quality` in this repository, installed to `~/.agents/skills/j5-test-quality` |
 | GitHub | `gh` CLI (issues, PRs, checks, GraphQL for review threads) | `PATH` |
 
