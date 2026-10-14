@@ -78,3 +78,35 @@ jobs:
       - name: test:shell
         if: ${{ !cancelled() }}
         run: bun run test:shell
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        # PowerShell, the default shell docker-agent picks on Windows.
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Report environment
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          git config --get core.autocrlf
+          Get-Command bash, sh, git, gh -ErrorAction SilentlyContinue | Format-Table Name, Source -AutoSize
+      - run: bun install --frozen-lockfile
+      - name: typecheck
+        if: ${{ !cancelled() }}
+        run: bun run typecheck
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: bun run lint
+      - name: format:check
+        if: ${{ !cancelled() }}
+        run: bun run format:check
+      - name: test
+        if: ${{ !cancelled() }}
+        run: bun run test
