@@ -1,6 +1,7 @@
 // Command-line parsing for `j5`.
 //
 //   j5 [<team> [<entrypoint>]] [--project PATH] [--base REF] [--effort FLAVOR]
+//       [--queue N,N,... | --queue-label LABEL] [--max-rounds N|none]
 //       [--<parameter> VALUE]... [--print] [--help] [-- <docker agent run flags>...]
 //
 // Hand-rolled instead of node:util parseArgs because the accepted `--<parameter>`
@@ -9,7 +10,14 @@
 // findUnknownOptionNames.
 
 /** Launcher options that take a value. */
-export const LAUNCHER_VALUE_OPTION_NAMES = ["project", "base", "effort"] as const;
+export const LAUNCHER_VALUE_OPTION_NAMES = [
+  "project",
+  "base",
+  "effort",
+  "queue",
+  "queue-label",
+  "max-rounds",
+] as const;
 
 /** Launcher options that take no value. */
 export const LAUNCHER_SWITCH_NAMES = ["print", "help"] as const;

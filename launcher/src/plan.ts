@@ -15,6 +15,7 @@ import { ORIGIN_REMOTE_NAME, type WorktreeState } from "./git.ts";
 import {
   BUILT_IN_REPOSITORY_PLACEHOLDER,
   type EntryPointDefinition,
+  QUEUE_PLACEHOLDERS,
   type WorkflowManifest,
 } from "./manifest.ts";
 import { fillTemplate } from "./template.ts";
@@ -42,6 +43,18 @@ export type WorktreeFacts = {
   pullRequestBranch: { name: string; existsLocally: boolean } | undefined;
 };
 
+/** Where an item stands in a queue run, for the entry point's queue preamble. */
+export type QueueItemContext = {
+  /** 1-based place of this item in the queue. */
+  position: number;
+  count: number;
+  /** The fix-round limit in words, e.g. "at most 3 fix rounds". */
+  roundLimitText: string;
+};
+
+// Between the queue preamble and the entry point's own message.
+const PREAMBLE_SEPARATOR = "\n\n";
+
 /** Everything needed to build the commands, already validated and resolved. */
 export type LaunchRequest = {
   manifest: WorkflowManifest;
@@ -58,6 +71,8 @@ export type LaunchRequest = {
   baseRef: string | undefined;
   /** What exists at the worktree path; required when the worktree mode is `new` or `pr`. */
   worktree: WorktreeFacts | undefined;
+  /** Set for one item of a queue run: its message starts with the entry point's queue preamble. */
+  queueItem: QueueItemContext | undefined;
   /** Extra `docker agent run` flags given after `--`, such as `--safety balanced`. */
   passthroughArguments: string[];
   /** PATH of the launcher process, which the team's helper directories are prepended to. */
@@ -239,7 +254,20 @@ export function buildLaunchPlan(request: LaunchRequest): LaunchPlan {
 
   commandWords.push(...request.passthroughArguments);
   // The message goes last: it is a positional argument after all flags.
-  commandWords.push(fillTemplate(entryPoint.message, templateValues));
+  let message = fillTemplate(entryPoint.message, templateValues);
+  if (request.queueItem !== undefined) {
+    if (entryPoint.queue === undefined) {
+      throw new Error(`entry point '${request.entryPointName}' has no queue`);
+    }
+    const preamble = fillTemplate(entryPoint.queue.preamble, {
+      ...templateValues,
+      [QUEUE_PLACEHOLDERS.position]: String(request.queueItem.position),
+      [QUEUE_PLACEHOLDERS.count]: String(request.queueItem.count),
+      [QUEUE_PLACEHOLDERS.roundLimit]: request.queueItem.roundLimitText,
+    });
+    message = `${preamble}${PREAMBLE_SEPARATOR}${message}`;
+  }
+  commandWords.push(message);
 
   const pathEntries = [...request.manifest.pathDirectories];
   if (request.inheritedPath !== "") {

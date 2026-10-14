@@ -90,6 +90,15 @@ pr-followup 456    # PR #456 → worktree ../<repo>-pr-456 on the PR's own branc
 closeout 456       # merged PR #456 → worktree ../<repo>-closeout-pr-456 at the latest default branch
 ```
 
+### A queue of issues, unattended
+
+```bash
+j5 issue-team work-issue --queue 474,480,482 --max-rounds 5    # these issues, in this order
+j5 issue-team work-issue --queue-label ready --max-rounds none # every open issue labelled `ready`, oldest first
+```
+
+Each issue runs `work-issue` on its own, in its own worktree, with `--exec`: nobody answers, so a step that would ask you stops that issue and reports why instead. The fix loop runs up to `--max-rounds` rounds (instead of two), or without a limit, and always stops when a round changes nothing. A passing issue opens its PR as a single run would. Logs and `summary.md` go to `.j5/queue/<start time>/` in your checkout; an issue that fails is reported and the next one starts; a Claude session limit stops the queue. `--queue-label` needs `gh` logged in to an account that can see the repository (or `GH_TOKEN`). Details: [docs/launcher.md](../../docs/launcher.md#queue-runs).
+
 Worktrees sit beside the checkout and carry the repository name, so the same number in two repositories never collides. Running the same stage again continues in its existing worktree. `pr-followup` finds the PR's branch with git over your remote (no `gh` needed for that step) and refuses a PR from a fork. Details: [docs/launcher.md](../../docs/launcher.md#the-manifest-workflowsteamworkflowyaml).
 
 ```bash

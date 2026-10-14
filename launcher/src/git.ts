@@ -212,3 +212,58 @@ export function resolvePullRequestBranch(
   }
   return branchName;
 }
+
+// GitHub returns at most this many issues for one label; a queue longer than this is
+// not something to run unattended in one go.
+const LABEL_ISSUE_LIMIT = 200;
+
+function isIssueNumberEntry(entry: unknown): entry is { number: number } {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    "number" in entry &&
+    typeof entry.number === "number" &&
+    Number.isInteger(entry.number) &&
+    entry.number > 0
+  );
+}
+
+/**
+ * Lists the numbers of the repository's open issues that carry the label, oldest
+ * first, with `gh issue list`. Unlike the git lookups above this needs a gh login
+ * (or GH_TOKEN) that can see the repository.
+ * @throws Error when gh fails or prints something other than a list of issue numbers.
+ */
+export function listOpenIssuesWithLabel(repositoryRoot: string, label: string): string[] {
+  const result = runCommand(
+    [
+      "gh",
+      "issue",
+      "list",
+      "--label",
+      label,
+      "--state",
+      "open",
+      "--json",
+      "number",
+      "--limit",
+      String(LABEL_ISSUE_LIMIT),
+    ],
+    repositoryRoot,
+  );
+  if (result.exitCode !== SUCCESS_EXIT_CODE) {
+    throw new Error(
+      `gh issue list --label ${label} failed: ${result.standardError}; --queue-label needs a gh login (or GH_TOKEN) that can see this repository`,
+    );
+  }
+  const parsed: unknown = JSON.parse(result.standardOutput);
+  if (!Array.isArray(parsed) || !parsed.every(isIssueNumberEntry)) {
+    throw new Error(
+      `gh issue list printed something other than issue numbers: ${result.standardOutput}`,
+    );
+  }
+  return parsed
+    .map((entry) => entry.number)
+    .toSorted((left, right) => left - right)
+    .map(String);
+}

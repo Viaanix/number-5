@@ -50,6 +50,22 @@ ${entryPointYaml}
 `;
 }
 
+// The work-issue entry point with a queue block; `queueYaml` is indented under it.
+function manifestWithQueue(
+  queueYaml: string,
+  messageYaml = 'message: "Work issue #{issue}"',
+): string {
+  return manifestWithWorkIssue(`    description: Work one issue
+    agent: root
+    parameters:
+      issue: { type: integer, label: Issue number }
+      title: { type: string, label: Title }
+    worktree: { mode: new, name: "{repo}-issue-{issue}" }
+    ${messageYaml}
+    queue:
+${queueYaml}`);
+}
+
 describe("loadManifest", () => {
   test("resolves team and PATH directories against the manifest's directory and fills defaults", () => {
     const manifestPath = writeManifest(VALID_MANIFEST_YAML);
@@ -160,6 +176,61 @@ describe("loadManifest", () => {
     );
     expect(() => loadManifest(manifestPath)).toThrow(
       "entrypoints.work-issue.worktree.pull_request_parameter: 'pr' must be an integer parameter",
+    );
+  });
+
+  test("accepts a queue over an integer parameter whose preamble uses the queue placeholders", () => {
+    const manifest = loadManifest(
+      writeManifest(
+        manifestWithQueue(`      parameter: issue
+      preamble: "Item {position} of {count} in {repo}, issue {issue}: {round_limit}."`),
+      ),
+    );
+    expect(manifest.entrypoints["work-issue"]?.queue?.parameter).toBe("issue");
+  });
+
+  test("rejects a queue over an undeclared parameter, and over a string parameter", () => {
+    expect(() =>
+      loadManifest(writeManifest(manifestWithQueue("      parameter: pr\n      preamble: x"))),
+    ).toThrow("entrypoints.work-issue.queue.parameter: 'pr' is not a declared parameter");
+    expect(() =>
+      loadManifest(writeManifest(manifestWithQueue("      parameter: title\n      preamble: x"))),
+    ).toThrow("entrypoints.work-issue.queue.parameter: 'title' must be an integer parameter");
+  });
+
+  test("rejects an unknown placeholder in the preamble", () => {
+    expect(() =>
+      loadManifest(
+        writeManifest(manifestWithQueue('      parameter: issue\n      preamble: "{rounds}"')),
+      ),
+    ).toThrow("entrypoints.work-issue.queue.preamble: unknown placeholder {rounds}");
+  });
+
+  // Catches {round_limit} reaching a single run's prompt, where nothing fills it.
+  test("keeps the queue placeholders out of the message", () => {
+    expect(() =>
+      loadManifest(
+        writeManifest(
+          manifestWithQueue(
+            "      parameter: issue\n      preamble: x",
+            'message: "Work {issue}, {round_limit}"',
+          ),
+        ),
+      ),
+    ).toThrow("entrypoints.work-issue.message: unknown placeholder {round_limit}");
+  });
+
+  test("reserves the queue placeholder names as parameter names", () => {
+    const manifestPath = writeManifest(
+      manifestWithWorkIssue(`    description: d
+    agent: root
+    parameters:
+      count: { type: integer, label: Count }
+    worktree: { mode: none }
+    message: "m"`),
+    );
+    expect(() => loadManifest(manifestPath)).toThrow(
+      "entrypoints.work-issue.parameters.count: name is reserved by the launcher",
     );
   });
 

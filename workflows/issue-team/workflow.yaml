@@ -21,6 +21,20 @@ entrypoints:
       mode: new
       # The repository name keeps the same issue number in two repositories apart.
       name: "{repo}-issue-{issue}"
+    # `j5 issue-team work-issue --queue 474,480 --max-rounds 5` (or --queue-label) runs
+    # this entry point once per issue, unattended; the preamble goes before the message.
+    queue:
+      parameter: issue
+      preamble: |
+        UNATTENDED QUEUE RUN — issue {issue}, item {position} of {count}. Read this first; it overrides the procedure below where they differ.
+
+        - Nobody is watching and nobody will answer. Wherever the procedure says to ask the user, do not ask: stop, and report why in the RESULT line.
+        - Fix rounds: {round_limit}, instead of the procedure's "at most two fix rounds". Whatever the limit, stop as soon as a round changes nothing: the same reviewer blocker, or the same failing test, twice in a row.
+        - Keep going until the tests pass and the reviewer approves, then publish as step 10 says.
+        - The very last line of your final message must be exactly one of these, alone on its line:
+          RESULT: PR <the pull request URL>
+          RESULT: FAILED <one line: what stopped you>
+          Do not write a RESULT line anywhere else.
     message: |
       Work issue #{issue}.
 
