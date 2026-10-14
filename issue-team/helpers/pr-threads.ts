@@ -3,6 +3,10 @@
 // path, line, comments). `pr` comes from the command line or the environment
 // (docker-agent's pr_threads tool sets it as an environment variable).
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { z } from "zod";
 
 import { HelperUsageError, readToolArgument, runAndCapture, runHelper } from "./command.ts";
@@ -60,23 +64,34 @@ runHelper("issue-team-pr-threads", () => {
   const owner = repository.owner.login;
   const name = repository.name;
 
-  const response = reviewThreadsResponseSchema.parse(
-    JSON.parse(
-      runAndCapture([
-        "gh",
-        "api",
-        "graphql",
-        "-f",
-        `owner=${owner}`,
-        "-f",
-        `name=${name}`,
-        "-F",
-        `pr=${pullRequestNumber}`,
-        "-f",
-        `query=${REVIEW_THREADS_QUERY}`,
-      ]),
-    ),
-  );
+  // The multi-line query goes to gh as a file (`-F query=@<file>`), never as an
+  // argument: Bun refuses to pass newlines and other cmd.exe special characters to a
+  // .cmd program (a gh installed as a .cmd shim on Windows, or a test double).
+  const queryDirectory = mkdtempSync(join(tmpdir(), "issue-team-pr-threads-"));
+  let response: z.infer<typeof reviewThreadsResponseSchema>;
+  try {
+    const queryPath = join(queryDirectory, "review-threads.graphql");
+    writeFileSync(queryPath, REVIEW_THREADS_QUERY);
+    response = reviewThreadsResponseSchema.parse(
+      JSON.parse(
+        runAndCapture([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `owner=${owner}`,
+          "-f",
+          `name=${name}`,
+          "-F",
+          `pr=${pullRequestNumber}`,
+          "-F",
+          `query=@${queryPath}`,
+        ]),
+      ),
+    );
+  } finally {
+    rmSync(queryDirectory, { recursive: true, force: true });
+  }
 
   for (const thread of response.data.repository.pullRequest.reviewThreads.nodes) {
     if (thread.isResolved) {
