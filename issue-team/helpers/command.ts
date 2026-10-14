@@ -17,11 +17,27 @@ export class HelperUsageError extends Error {
 }
 
 /**
+ * Resolves a command name through PATH the way a shell would, including Windows
+ * PATHEXT (.exe, .cmd, ...), so the first match on PATH runs even when it is a .cmd
+ * wrapper. Falls back to the bare name, letting the spawn report it as missing.
+ */
+function resolveExecutable(commandWords: string[]): string[] {
+  const [commandName, ...commandArguments] = commandWords;
+  if (commandName === undefined) {
+    throw new Error("no command given");
+  }
+  return [Bun.which(commandName) ?? commandName, ...commandArguments];
+}
+
+/**
  * Runs a command in the current directory and returns its stdout unchanged.
  * @throws Error with the command's stderr when it exits non-zero.
  */
 export function runAndCapture(commandWords: string[]): string {
-  const completedProcess = Bun.spawnSync(commandWords, { stdout: "pipe", stderr: "pipe" });
+  const completedProcess = Bun.spawnSync(resolveExecutable(commandWords), {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   if (completedProcess.exitCode !== SUCCESS_EXIT_CODE) {
     throw new Error(
       `${commandWords.join(" ")} failed (exit ${completedProcess.exitCode}): ${completedProcess.stderr.toString().trim()}`,
@@ -33,8 +49,8 @@ export function runAndCapture(commandWords: string[]): string {
 /** Runs a command and reports only whether it exited 0. */
 export function succeeds(commandWords: string[]): boolean {
   return (
-    Bun.spawnSync(commandWords, { stdout: "ignore", stderr: "ignore" }).exitCode ===
-    SUCCESS_EXIT_CODE
+    Bun.spawnSync(resolveExecutable(commandWords), { stdout: "ignore", stderr: "ignore" })
+      .exitCode === SUCCESS_EXIT_CODE
   );
 }
 

@@ -199,7 +199,10 @@ describe("issue-team-pr-threads", () => {
       createTemporaryDirectory(),
       fakeGhEnvironment,
     );
-    expect(result.exitCode).toBe(0);
+    expect({ exitCode: result.exitCode, standardError: result.standardError }).toEqual({
+      exitCode: 0,
+      standardError: "",
+    });
     expect(result.standardOutput).toBe(
       `${JSON.stringify({ id: "T_open", isOutdated: false, path: "b.ts", line: 7, comments: { nodes: [{ databaseId: 11, author: { login: "reviewer" }, body: "rename this", url: "https://example.invalid/11" }] } })}\n` +
         `${JSON.stringify({ id: "T_outdated", isOutdated: true, path: "c.ts", line: null, comments: { nodes: [] } })}\n`,
@@ -211,7 +214,10 @@ describe("issue-team-pr-threads", () => {
       ...fakeGhEnvironment,
       pr: "789",
     });
-    expect(result.exitCode).toBe(0);
+    expect({ exitCode: result.exitCode, standardError: result.standardError }).toEqual({
+      exitCode: 0,
+      standardError: "",
+    });
     const lastCall: unknown = JSON.parse(
       readFileSync(logPath, "utf8").trim().split("\n").at(-1) ?? "[]",
     );
