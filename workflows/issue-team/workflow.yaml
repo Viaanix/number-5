@@ -28,7 +28,8 @@ entrypoints:
       preamble: |
         UNATTENDED QUEUE RUN — issue {issue}, item {position} of {count}. Read this first; it overrides the procedure below where they differ.
 
-        - Nobody is watching and nobody will answer. Wherever the procedure says to ask the user, do not ask: stop, and report why in the RESULT line.
+        - Nobody is watching and nobody will answer. Wherever the procedure says to ask the user because the issue is ambiguous or leaves a choice open, do not ask: decide. Pick the option you would recommend, build and test it like any other change, and explain it in the PR body under "Why": a "Decisions" list with each choice, the alternatives you considered, and why you chose as you did. The user's review of the PR is the check on your decision.
+        - Stop instead, and report why in the RESULT line, only when the decision needs a change in another repository, would have an effect that not merging the PR cannot undo (a data migration, an external system, a message sent), or when you cannot tell how to run the tests. If the option you would pick changes nothing in this repository (the issue only needs an answer), do not invent a change: stop, and put your answer in the RESULT line.
         - Fix rounds: {round_limit}, instead of the procedure's "at most two fix rounds". Whatever the limit, stop as soon as a round changes nothing: the same reviewer blocker, or the same failing test, twice in a row.
         - Keep going until the tests pass and the reviewer approves, then publish as step 10 says.
         - The very last line of your final message must be exactly one of these, alone on its line:

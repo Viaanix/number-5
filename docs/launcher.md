@@ -65,7 +65,7 @@ git -C ~/code/my-app fetch origin main && git -C ~/code/my-app worktree add -b w
 
 `j5 issue-team work-issue --queue 474,480,482 --max-rounds 5` (or `--queue-label ready`) runs the entry point once per issue, one after another, **unattended**:
 
-- Each item gets its own worktree, exactly as a single run would, and runs `docker agent run … --exec`: no TUI, nobody to answer. The entry point's `queue.preamble` goes before its prompt and says so (issue-team's tells the agent to stop and report instead of asking, replaces its fix-round limit with `--max-rounds`, and asks for a last line `RESULT: PR <url>` or `RESULT: FAILED <reason>`).
+- Each item gets its own worktree, exactly as a single run would, and runs `docker agent run … --exec`: no TUI, nobody to answer. The entry point's `queue.preamble` goes before its prompt and says so (issue-team's tells the agent to decide where it would have asked, and to explain each decision in the PR, replaces its fix-round limit with `--max-rounds`, and asks for a last line `RESULT: PR <url>` or `RESULT: FAILED <reason>`).
 - Each item's output is shown live and saved to `<project>/.j5/queue/<start time>/issue-<n>.log`; `summary.md` in the same directory lists every item's outcome.
 - **The outcome comes from the `RESULT:` line**, never the exit code: `docker agent run --exec` exits 0 whenever the agent finishes its turn. No `RESULT:` line means the item failed.
 - An item that fails (including a failed git step, e.g. its branch already exists) is reported and the queue goes on. An item whose agent could not run at all (docker-agent printed `harness … failed`, e.g. the Claude session limit) **stops the queue**, since every later item would fail the same way. Ctrl-C stops it after the current item.
