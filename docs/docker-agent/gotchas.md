@@ -111,6 +111,14 @@ ANTHROPIC_API_KEY=placeholder docker agent run issue-team/team.yaml --config-dir
 
 **Consequence:** installing a skill by linking `~/.agents/skills/<name>` to a checkout does not work; the skill must be copied, and re-copied after changes.
 
+### Local skills get `read_skill`, but no `read_skill_file`
+
+**Observed:** v1.145.0, 2026-10-14.
+
+**Receipt:** `docker agent debug toolsets` for an agent with `skills: [j5-test-quality]` (installed in `~/.agents/skills`) lists only `read_skill`. In the source, `read_skill_file` is offered only when a skill has supporting files listed (`pkg/tools/builtin/skills/skills.go`), which local skills never do.
+
+**Consequence:** instructions must point at a local skill's other files by path. The filesystem tools expand a leading `~/` on every OS (`pkg/tools/builtin/filesystem/filesystem_paths.go`), so `read_file ~/.agents/skills/<name>/workflows/x.md` works on Windows too.
+
 **Search paths** (same source): `~/.codex/skills` (recursive), `~/.claude/skills` (flat), `~/.agents/skills` (recursive), then `.claude/skills` in the working directory and `.github/skills` / `.agents/skills` in each directory from the git root down to it. All built with `filepath.Join`, so identical on every OS.
 
 ## Platforms
@@ -131,7 +139,6 @@ The data directory, and with it `worktrees/`, is `<home>/.cagent` on every OS (`
 
 Carried over from `issue-team/README.md` ("Known limits") or reported without a receipt in this repository. Confirm one with a receipt, then move it up.
 
-- **Local skills get no `read_skill_file` tool.** Instructions must point at the skill's files by path (e.g. `~/.agents/skills/<name>/...`).
 - **The docs on docker.github.io track `main`**, not the release, and document flags v1.145.0 lacks (e.g. `--last`). Trust `docker agent <command> --help` over the website.
 - **PR worktrees are named `pr-<number>`** without the repository name, so the same PR number in two repositories collides under `~/.cagent/worktrees/`. `daw` refuses a `pr-<n>` worktree whose `origin` is another repository.
 - **Worktrees from `--exec` runs are never removed automatically.** Clean up with `git worktree list` / `git worktree remove <path>`.

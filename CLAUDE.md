@@ -9,6 +9,7 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 | `<team>/` | One team per top-level directory: `team.yaml` (docker-agent), `workflow.yaml` (launcher manifest), `instructions/`, `bin/`. `issue-team/` is the reference team |
 | `launcher/src/` | The `daw` CLI (Bun + TypeScript). `cli.ts` is the entry; `plan.ts` builds the docker-agent command and has no side effects |
 | `launcher/test/` | bun:test tests; real temporary git repositories, no module mocks |
+| `skills/` | Agent skills shipped with the teams (`j5-test-quality`); the installer copies them to `~/.agents/skills/` |
 | `bin/daw` | Shim the alias points at |
 | `scripts/` | `install.ts` (link + shell alias/function, all OSes), `lint-shell.sh`, `validate-teams.ts` |
 | `tests/` | bun:test tests for `scripts/` |

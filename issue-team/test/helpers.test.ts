@@ -127,6 +127,34 @@ describe("issue-team-change-diff", () => {
   });
 });
 
+// Adds an uncommitted test file containing `.only(` and registers it with
+// `git add -N`, as the tester is told to before calling test_prescreen.
+function addFocusedTestFile(projectRoot: string): void {
+  writeFileSync(join(projectRoot, "focused.test.ts"), 'it.only("focused", () => {});\n');
+  runGit(projectRoot, ["add", "-N", "focused.test.ts"]);
+}
+
+const STRICT_FAILURE_EXIT_CODE = 1;
+
+describe("issue-team-test-prescreen", () => {
+  test("passes a branch whose changes hold no fig-leaf signals", () => {
+    const { projectRoot } = createFeatureBranchProject();
+    const result = runHelperScript("test-prescreen", [], projectRoot);
+    expect(result.exitCode).toBe(0);
+    expect(result.standardOutput).toBe(
+      "check-test-quality: no findings (0 test file(s) scanned)\n",
+    );
+  });
+
+  test("fails on an uncommitted new test file with .only, naming file and line", () => {
+    const { projectRoot } = createFeatureBranchProject();
+    addFocusedTestFile(projectRoot);
+    const result = runHelperScript("test-prescreen", [], projectRoot);
+    expect(result.exitCode).toBe(STRICT_FAILURE_EXIT_CODE);
+    expect(result.standardOutput).toContain("[HIGH] disabled-tests  focused.test.ts:1\n");
+  });
+});
+
 describe("issue-team-pr-threads", () => {
   // One resolved and two unresolved threads, in GitHub's field order.
   const GRAPHQL_RESPONSE = {
@@ -283,6 +311,14 @@ describe.each(DOCKER_AGENT_SHELLS)(
         standardOutput: `origin/${FIXTURE_DEFAULT_BRANCH}\n`,
         standardError: "",
       });
+    });
+
+    test("issue-team-test-prescreen", () => {
+      const { projectRoot } = createFeatureBranchProject();
+      addFocusedTestFile(projectRoot);
+      const result = runThroughShell("issue-team-test-prescreen", projectRoot);
+      expect(result.exitCode).toBe(STRICT_FAILURE_EXIT_CODE);
+      expect(result.standardOutput).toContain("[HIGH] disabled-tests  focused.test.ts:1\n");
     });
 
     test("issue-team-change-diff with since in the environment", () => {

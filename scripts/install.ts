@@ -4,17 +4,24 @@
 //      needed). The alias goes through it, so moving the clone only needs a re-run;
 //   2. a `daw` alias (bash, zsh) or function (PowerShell) in the shell's startup file,
 //      inside marker lines so re-running replaces it instead of adding a second copy;
-//   3. the launcher's bun dependencies, when node_modules is missing.
+//   3. this repository's skills (skills/<name>) copied to ~/.agents/skills/<name>, where
+//      docker-agent finds them. Copied, not linked: docker-agent skips symlinked skill
+//      directories. Re-running refreshes copies this installer made (marked with
+//      INSTALLED_SKILL_MARKER_FILE) and never touches a skill directory it did not make;
+//   4. the launcher's bun dependencies, when node_modules is missing.
 //
 // Usage: bun scripts/install.ts [--link PATH] [--alias NAME] [--shell bash|zsh|powershell]
 //                               [--profile FILE] [--dry-run] [--uninstall]
 
 import {
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -36,6 +43,12 @@ const DEFAULT_ALIAS_NAME = "daw";
 const ALIAS_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const LAUNCHER_ENTRY_RELATIVE_PATH = join("launcher", "src", "cli.ts");
 const SUPPORTED_SHELLS = ["bash", "zsh", "powershell"] as const;
+
+// Where docker-agent looks for skills in the home directory (pkg/skills/local.go).
+const INSTALLED_SKILLS_RELATIVE_DIRECTORY = join(".agents", "skills");
+const SKILLS_SOURCE_DIRECTORY_NAME = "skills";
+/** Written into each skill copy; only directories holding it are replaced or removed. */
+export const INSTALLED_SKILL_MARKER_FILE = ".installed-by-docker-agent-workflows";
 
 /** A shell whose startup file the installer knows how to write. */
 export type SupportedShell = (typeof SUPPORTED_SHELLS)[number];
@@ -188,6 +201,37 @@ function createLink(linkPath: string, repositoryRoot: string, platform: NodeJS.P
   symlinkSync(repositoryRoot, linkPath, platform === "win32" ? "junction" : "dir");
 }
 
+/** A skill shipped in this repository and where it is installed. */
+type SkillPlacement = { skillName: string; sourcePath: string; installedPath: string };
+
+function listSkillPlacements(repositoryRoot: string, homeDirectory: string): SkillPlacement[] {
+  const skillsSourceDirectory = join(repositoryRoot, SKILLS_SOURCE_DIRECTORY_NAME);
+  if (!existsSync(skillsSourceDirectory)) {
+    return [];
+  }
+  return readdirSync(skillsSourceDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      skillName: entry.name,
+      sourcePath: join(skillsSourceDirectory, entry.name),
+      installedPath: join(homeDirectory, INSTALLED_SKILLS_RELATIVE_DIRECTORY, entry.name),
+    }))
+    .toSorted((left, right) => left.skillName.localeCompare(right.skillName));
+}
+
+function wasInstalledByThisInstaller(installedPath: string): boolean {
+  return existsSync(join(installedPath, INSTALLED_SKILL_MARKER_FILE));
+}
+
+function copySkill(placement: SkillPlacement): void {
+  rmSync(placement.installedPath, { recursive: true, force: true });
+  cpSync(placement.sourcePath, placement.installedPath, { recursive: true });
+  writeFileSync(
+    join(placement.installedPath, INSTALLED_SKILL_MARKER_FILE),
+    `Copied from ${placement.sourcePath} by docker-agent-workflows scripts/install.ts.\nRe-run the installer to refresh; edits here are overwritten.\n`,
+  );
+}
+
 /**
  * Runs the installer and returns the report lines it would print.
  * @throws InstallerError for bad options or a path it refuses to replace.
@@ -232,6 +276,13 @@ export function runInstaller(
     } else if (existsSync(linkPath) || isLinkOrJunction(linkPath)) {
       report.push(`left ${linkPath} alone: it is not a link to ${repositoryRoot}`);
     }
+    for (const placement of listSkillPlacements(repositoryRoot, environment.homeDirectory)) {
+      if (wasInstalledByThisInstaller(placement.installedPath)) {
+        change(`remove skill ${placement.skillName} from ${placement.installedPath}`, () => {
+          rmSync(placement.installedPath, { recursive: true, force: true });
+        });
+      }
+    }
     report.push(options.dryRun ? "dry run: nothing changed" : "uninstalled; open a new shell");
     return report;
   }
@@ -259,7 +310,26 @@ export function runInstaller(
     writeFileSync(profilePath, replaceBlock(profileText, blockBody));
   });
 
-  // 3. Dependencies.
+  // 3. Skills.
+  const skillReport: string[] = [];
+  for (const placement of listSkillPlacements(repositoryRoot, environment.homeDirectory)) {
+    if (!existsSync(placement.installedPath)) {
+      change(`install skill ${placement.skillName} to ${placement.installedPath}`, () => {
+        copySkill(placement);
+      });
+    } else if (wasInstalledByThisInstaller(placement.installedPath)) {
+      change(`refresh skill ${placement.skillName} in ${placement.installedPath}`, () => {
+        copySkill(placement);
+      });
+    } else {
+      skillReport.push(
+        `left ${placement.installedPath} alone: it was not installed by this installer (no ${INSTALLED_SKILL_MARKER_FILE})`,
+      );
+    }
+  }
+  report.push(...skillReport);
+
+  // 4. Dependencies.
   if (existsSync(join(repositoryRoot, "node_modules"))) {
     report.push("dependencies already installed");
   } else {

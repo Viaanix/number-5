@@ -23,6 +23,7 @@ import {
   BLOCK_BEGIN_MARKER,
   BLOCK_END_MARKER,
   buildBlockBody,
+  INSTALLED_SKILL_MARKER_FILE,
   chooseProfilePath,
   chooseShell,
   type InstallerEnvironment,
@@ -35,6 +36,7 @@ import {
 const REPOSITORY_ROOT = resolve(import.meta.dir, "..");
 const RUNNING_ON_WINDOWS = process.platform === "win32";
 const USER_ALIAS_LINE = "alias gs='git status'";
+const SAMPLE_SKILL_TEXT = '---\nname: sample-skill\ndescription: "A sample."\n---\nBody\n';
 
 const temporaryDirectories: string[] = [];
 afterAll(() => {
@@ -65,6 +67,13 @@ function createSandbox(overrides: Partial<InstallerEnvironment> = {}): Sandbox {
   const repositoryRoot = join(root, "repository");
   mkdirSync(homeDirectory);
   mkdirSync(join(repositoryRoot, "node_modules"), { recursive: true });
+  // A skill shipped by the stand-in repository.
+  mkdirSync(join(repositoryRoot, "skills", "sample-skill", "references"), { recursive: true });
+  writeFileSync(join(repositoryRoot, "skills", "sample-skill", "SKILL.md"), SAMPLE_SKILL_TEXT);
+  writeFileSync(
+    join(repositoryRoot, "skills", "sample-skill", "references", "notes.md"),
+    "notes\n",
+  );
   // The Debian/Ubuntu layout: ~/.bashrc sources ~/.bash_aliases.
   writeFileSync(join(homeDirectory, ".bashrc"), "[ -f ~/.bash_aliases ] && . ~/.bash_aliases\n");
   writeFileSync(join(homeDirectory, ".bash_aliases"), `${USER_ALIAS_LINE}\n`);
@@ -373,5 +382,63 @@ describe("installed command runs in a real shell", () => {
       standardError: completedProcess.stderr.toString(),
     }).toEqual({ exitCode: 0, standardError: "" });
     expect(completedProcess.stdout.toString()).toContain("issue-team — ");
+  });
+});
+
+// Where the stand-in repository's sample skill is installed.
+function installedSkillPath(sandbox: Sandbox): string {
+  return join(sandbox.homeDirectory, ".agents", "skills", "sample-skill");
+}
+
+describe("runInstaller — skills", () => {
+  test("copies each repository skill into ~/.agents/skills as a real directory, marked", () => {
+    const sandbox = createSandbox();
+    install(sandbox);
+    const skillPath = installedSkillPath(sandbox);
+    // docker-agent skips symlinked skill directories, so this must be a copy.
+    expect(lstatSync(skillPath).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(skillPath, "SKILL.md"), "utf8")).toBe(SAMPLE_SKILL_TEXT);
+    expect(readFileSync(join(skillPath, "references", "notes.md"), "utf8")).toBe("notes\n");
+    expect(existsSync(join(skillPath, INSTALLED_SKILL_MARKER_FILE))).toBe(true);
+  });
+
+  test("a re-run refreshes its own copy, dropping files removed from the repository", () => {
+    const sandbox = createSandbox();
+    install(sandbox);
+    writeFileSync(join(installedSkillPath(sandbox), "stale.md"), "from an older version\n");
+    writeFileSync(join(sandbox.repositoryRoot, "skills", "sample-skill", "SKILL.md"), "updated\n");
+    install(sandbox);
+    expect(readFileSync(join(installedSkillPath(sandbox), "SKILL.md"), "utf8")).toBe("updated\n");
+    expect(existsSync(join(installedSkillPath(sandbox), "stale.md"))).toBe(false);
+  });
+
+  test("never overwrites a same-named skill it did not install, and says so", () => {
+    const sandbox = createSandbox();
+    mkdirSync(installedSkillPath(sandbox), { recursive: true });
+    writeFileSync(join(installedSkillPath(sandbox), "SKILL.md"), "the user's own skill\n");
+    const report = install(sandbox);
+    expect(readFileSync(join(installedSkillPath(sandbox), "SKILL.md"), "utf8")).toBe(
+      "the user's own skill\n",
+    );
+    expect(report).toContain(
+      `left ${installedSkillPath(sandbox)} alone: it was not installed by this installer (no ${INSTALLED_SKILL_MARKER_FILE})`,
+    );
+  });
+
+  test("uninstall removes its own copy and leaves a skill it did not install", () => {
+    const sandbox = createSandbox();
+    install(sandbox);
+    const foreignSkillPath = join(sandbox.homeDirectory, ".agents", "skills", "users-own");
+    mkdirSync(foreignSkillPath, { recursive: true });
+    install(sandbox, { uninstall: true });
+    expect(existsSync(installedSkillPath(sandbox))).toBe(false);
+    expect(existsSync(foreignSkillPath)).toBe(true);
+  });
+
+  test("--dry-run installs no skill", () => {
+    const sandbox = createSandbox();
+    const report = install(sandbox, { dryRun: true });
+    expect(existsSync(installedSkillPath(sandbox))).toBe(false);
+    expect(report).toContain(`would install skill sample-skill to ${installedSkillPath(sandbox)}`);
   });
 });

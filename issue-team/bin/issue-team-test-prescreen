@@ -1,0 +1,4 @@
+#!/bin/sh
+# issue-team-test-prescreen for Linux and macOS: runs helpers/test-prescreen.ts with Bun. The Windows
+# launcher is issue-team-test-prescreen.cmd; docker-agent's script tools call either by bare name.
+exec bun "$(dirname "$0")/../helpers/test-prescreen.ts" "$@"

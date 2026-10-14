@@ -11,7 +11,7 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), plus whatever each team needs (issue-team: `gh` and `claude` logged in; see its README).
 
 ```bash
-bun scripts/install.ts      # link ~/docker-agent-workflows, add `daw` to your shell, bun install
+bun scripts/install.ts      # link ~/docker-agent-workflows, add `daw` to your shell, install skills, bun install
 # open a new terminal (bash, zsh, or PowerShell on Windows), then:
 daw list
 cd ~/code/some-repo && daw issue-team work-issue --issue 123

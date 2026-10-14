@@ -53,17 +53,23 @@ agents:
     description: Writes tests that fail against broken implementations, audits changed tests, runs suites. Does not edit production code.
     instruction_file: instructions/tester.md
     add_prompt_files: [AGENTS.md, CLAUDE.md]
-    skills: [test-quality-with-ai]
+    skills: [j5-test-quality]
     toolsets:
       - type: filesystem
       - type: shell
+      - type: script
+        shell:
+          test_prescreen:
+            # Bare name, no arguments (see pr_threads).
+            cmd: issue-team-test-prescreen
+            description: Runs the j5-test-quality Tier 1 pre-screen in strict mode on the test files changed since this branch left the remote default branch, including uncommitted ones. New test files count only after `git add -N <file>`. Prints the findings; a non-zero exit means HIGH findings (1) or that the pre-screen could not run (2).
 
   reviewer:
     model: review
     description: Independent read-only review of the branch's full change against the issue. Cannot edit files.
     instruction_file: instructions/reviewer.md
     add_prompt_files: [AGENTS.md, CLAUDE.md]
-    skills: [test-quality-with-ai]
+    skills: [j5-test-quality]
     toolsets:
       - type: git
       - type: filesystem
