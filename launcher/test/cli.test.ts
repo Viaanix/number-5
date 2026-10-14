@@ -502,7 +502,8 @@ describe("j5 queue", () => {
     );
 
     expect(result.exitCode).toBe(1);
-    const queueDirectory = join(projectRoot, ".j5", "queue");
+    // j5 reports paths under the canonical project path (macOS /private/var, Windows long names).
+    const queueDirectory = join(canonicalPath(projectRoot), ".j5", "queue");
     const [runDirectoryName, ...otherRuns] = readdirSync(queueDirectory);
     expect(otherRuns).toEqual([]);
     const runDirectory = join(queueDirectory, runDirectoryName ?? "");
