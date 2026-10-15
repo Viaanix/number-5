@@ -1,4 +1,0 @@
-#!/bin/sh
-# issue-team-role for Linux and macOS: runs helpers/role.ts with Bun. The Windows
-# launcher is issue-team-role.cmd; agents call either by bare name.
-exec bun "$(dirname "$0")/../helpers/role.ts" "$@"

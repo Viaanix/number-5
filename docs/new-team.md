@@ -1,6 +1,6 @@
 # Adding a team or an experiment
 
-A team is a directory under `workflows/`. Use [pr-reviewer](../workflows/pr-reviewer/README.md) as the native-model reference, or copy `workflows/issue-team/` for a Claude Code harness team.
+A team is a directory under `workflows/`. Use [pr-reviewer](../workflows/pr-reviewer/README.md) as the small native-model reference and [issue-team](../workflows/issue-team/README.md) for a multi-agent one (sub-agents, shell, typed tools, permissions). test-quality is the only Claude Code harness team left.
 
 ## Layout
 
@@ -9,7 +9,6 @@ workflows/my-team/
   team.yaml           docker-agent config: native models/tools or CLI harnesses, flavors
   workflow.yaml       launcher manifest: entry points, parameters, worktree mode, task messages
   instructions/       optional: durable native-agent prompts loaded by instruction_file
-  roles/              optional: sub-agent role prompts shared by several entry points, printed by a <team>-role helper
   helpers/            deterministic Bun scripts the agents run by bare name
   bin/                one sh + one .cmd launcher per helper; listed in workflow.yaml `path`
   README.md           what it does, its agents, its limits

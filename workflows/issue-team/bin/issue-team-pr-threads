@@ -1,4 +1,0 @@
-#!/bin/sh
-# issue-team-pr-threads for Linux and macOS: runs helpers/pr-threads.ts with Bun. The Windows
-# launcher is issue-team-pr-threads.cmd; docker-agent's script tools call either by bare name.
-exec bun "$(dirname "$0")/../helpers/pr-threads.ts" "$@"

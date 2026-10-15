@@ -146,6 +146,113 @@ identifying facts in a small result, not at the start of a big one. A test with 
 small fixture will not catch this. Also: `git diff --unified=N --stat` prints the
 patch after the stat, so a stat command must not carry patch-implying options.
 
+### `shell` kills a call after 30 seconds unless `timeout` is passed
+
+**Observed:** Docker Agent v1.145.0, Linux, Sonnet 5.5 through the proxy, 2026-10-15.
+
+**Receipt:** a native builder agent ran `sleep 32 && echo slept` twice:
+
+```text
+shell {"cmd": "sleep 32 && echo slept once", "timeout": null} -> Command timed out after 30s
+shell {"cmd": "sleep 32 && echo slept once", "timeout": 60}   -> slept once
+```
+
+**Consequence:** an installs, build or test-suite command needs an explicit `timeout`,
+so the issue-team instructions say to pass one. Each call also starts a fresh shell:
+`cd` and variables do not carry over.
+
+### `read_skill` cannot read a skill's supporting files
+
+**Observed:** v1.145.0, 2026-10-15, an agent with `skills: [j5-test-quality]`.
+
+**Receipt:** `debug toolsets` listed only `read_skill` for it, and
+`read_skill {"name": "j5-test-quality/workflows/generate.md"}` returned
+`skill "j5-test-quality/workflows/generate.md" not found`. `read_skill {"name":
+"j5-test-quality"}` returned the 6 KB `SKILL.md` only.
+
+**Consequence:** a skill that points at workflow files needs `read_file` on its
+directory. issue-team's tester and reviewer read `~/.agents/skills/j5-test-quality/…`
+that way and no longer use the `skills:` setting.
+
+### Filesystem tools accept `~/…` paths, and `allow_list` expands `~`
+
+**Observed:** v1.145.0, Haiku 5.5, 2026-10-15, `allow_list: [".",
+"~/.agents/skills/j5-test-quality"]`.
+
+**Receipt:**
+
+```text
+read_file ~/.agents/skills/j5-test-quality/workflows/generate.md -> read (first heading returned)
+list_directory ~/.agents/skills/j5-test-quality/workflows        -> four workflow files
+read_file ~/.agents/skills/the-craft/SKILL.md                    -> outside the allowed directories (., ~/.agents/skills/j5-test-quality)
+```
+
+`add_environment_info` named the working directory, OS and shell, not the home directory.
+
+**Consequence:** an agent can be pointed at one directory under the home folder without
+a shell to find `$HOME`, and cannot read its siblings.
+
+### An unrestricted `search_files_content` from `/` can outlast the run
+
+**Observed:** v1.145.0, 2026-10-15, a native tester with an unrestricted filesystem toolset.
+
+**Receipt:** it called `search_files_content {"path": "/", …}` 5 seconds into its task and
+had not returned when the run was killed at 700 seconds (`The tool call was canceled`).
+
+**Consequence:** give every agent that can search an `allow_list`. A wrong skill path
+then fails fast instead of becoming a filesystem scan.
+
+### `--exec` rejects a tool that is not pre-approved
+
+**Observed:** v1.145.0, 2026-10-15, pr-reviewer's `pr_comment`, which is not in `permissions.allow`.
+
+**Receipt:** `j5 pr-reviewer review --pr 12 -- --exec --json` emitted a
+`tool_call_confirmation` and the tool response was `The user rejected the tool call.`;
+with `--safety autonomous` the same call posted. A run whose every tool is in
+`permissions.allow` emitted no `tool_call_confirmation` events.
+
+**Consequence:** list every tool an unattended run needs in `permissions.allow`. `deny`
+still wins over `allow`.
+
+### Opus 5.5 is rejected for the Pi proxy's subscription login
+
+**Observed:** v1.145.0, proxy with pi-openai-proxy 4.9.5 and Pi 0.73.0, 2026-10-15.
+
+**Receipt:** a native agent on `pi/claude-opus-5-5` failed on its first call:
+
+```text
+400 invalid_request_error: Claude Code 2.1.75 does not support this model;
+version 2.1.280 or newer is required (error_code: claude_code_version_too_old)
+```
+
+`claude-sonnet-5-5` and `claude-haiku-5-5` through the same login work.
+
+**Consequence:** the proxy's `models.json` does not list Opus 5.5, and issue-team's
+reviewer runs on Sonnet 5.5 where it used to run on Opus. Not tried: a newer Pi release.
+
+### `permissions.deny` globs block the spellings they name, and not a branch called `fix-foo`
+
+**Observed:** v1.145.0, Haiku 5.5 through the proxy, 2026-10-15, with issue-team's real
+`permissions` block and a `shell` toolset in a scratch repository with no remote.
+
+**Receipt:** twelve commands, one `shell` call each, `--exec --json`:
+
+```text
+refused (Tool 'shell' is denied by permissions configuration.):
+  git push --force origin main · git push -f origin main · git push origin +main
+  git reset --hard HEAD · git commit … (the hook-bypass flag) · gh pr ready 1
+  gh pr merge 1 · gh issue close 1 · sudo -n true
+ran:
+  git push -u origin fix-foo   (failed on its own: no such branch; not denied)
+  echo hello · git log --oneline
+```
+
+No `tool_call_confirmation` events. The denied calls never reached the shell.
+
+**Consequence:** `*git push* -f*` needs the space before `-f`; without it `fix-foo` would
+match. Patterns match the command text, so they are defense in depth: a spelling the
+globs do not name is not blocked.
+
 ### Read-only native filesystem tools can enforce a checkout boundary
 
 **Observed:** Docker Agent v1.145.0 on Linux, Haiku 5.5 through the proxy above,
@@ -289,5 +396,6 @@ Carried over from `workflows/issue-team/README.md` ("Known limits") or reported 
 - **`permissions.deny` rules cover docker-agent's own shell tool only.** A `harness: claude-code` agent runs Claude Code's tools, outside those rules.
 - **Script tools resolve commands through the docker-agent process's `PATH`.** A helper that is not on `PATH` fails with "command not found" at call time, not at startup. `j5` prepends each team's `path:` directories.
 - **`--worktree`, `--worktree-pr` and `--sandbox` cannot be combined.**
+- **A Sonnet 5.5 `edit_file` call through the proxy once arrived as invalid JSON.** Seen 2026-10-15 in issue-team's first real run (session `7acf06c5…`, tester): `{"path": "…", "edits": [{"oldText">: "", "newText": ""}]}`, answered `Error calling tool: failed to parse edit_file arguments: invalid character '>' after object key`. The tester then edited with `python3` heredocs; the builder never called `edit_file` and made six edits through `shell`. One failure, not a rate, and `edit_file` worked in an earlier probe (same model and proxy). Not known whether the model, the proxy's tool-schema translation or the stream caused it.
 - **On Windows, a multi-line message cannot pass through a `.cmd` / `.bat` `docker`.** cmd.exe ends a command at the first newline. Seen in CI (windows-latest, 2026-10-14): the launch test's fake `docker.cmd` exited 1 once messages became whole prompts, where it had passed with a one-line message; the test now uses a compiled fake. Real Docker is `docker.exe`, which `j5` spawns without cmd.exe, so this should not affect real runs; not yet run on Windows.
 - **A script-tool argument named `path` would replace `PATH` on Windows.** Inferred, not run: docker-agent passes script-tool arguments as environment variables (`script_shell.go`), and Windows environment variable names are case-insensitive. The teams here avoid the name (`test_prescreen` takes `target`).

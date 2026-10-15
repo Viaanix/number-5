@@ -24,8 +24,8 @@ import { fillTemplate } from "./template.ts";
 // keep them to characters that are safe as one path segment and in a branch name.
 const WORKTREE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-// Branch a `new` worktree gets: the prefix docker-agent used for --worktree, which
-// issue-team's closeout cleanup step still looks for.
+// Branch a `new` worktree gets: the prefix docker-agent used for --worktree. Kept so
+// branches users already have from that era still match.
 const NEW_WORKTREE_BRANCH_PREFIX = "worktree-";
 
 const REMOTE_TRACKING_PREFIX = `${ORIGIN_REMOTE_NAME}/`;

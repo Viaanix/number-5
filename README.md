@@ -8,9 +8,9 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 | Team | What it does |
 |---|---|
-| [issue-team](workflows/issue-team/README.md) | GitHub issue → pull request → review follow-up → post-merge closeout, in any repository |
+| [issue-team](workflows/issue-team/README.md) | GitHub issue → pull request, in any repository: ready when review and verification pass, a draft when they do not |
 | [test-quality](workflows/test-quality/README.md) | Audit, review, write or fix tests with the `j5-test-quality` skill, in the current checkout |
-| [pr-reviewer](workflows/pr-reviewer/README.md) | Native, read-only PR review with Claude Sonnet 5.5 through the local proxy; reports locally without posting to GitHub |
+| [pr-reviewer](workflows/pr-reviewer/README.md) | Native PR review with Claude Sonnet 5.5 through the local proxy; returns a report and posts it as one PR comment |
 
 ## Quick start
 

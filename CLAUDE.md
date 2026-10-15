@@ -6,7 +6,7 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 | Path | What |
 |---|---|
-| `workflows/<team>/` | One team per directory under `workflows/` (the launcher scans only there): `team.yaml` (native models/tools or Claude Code harness agents), `workflow.yaml` (launcher manifest), `helpers/` + `bin/`, optional `instructions/` and `roles/`. issue-team is the harness reference; pr-reviewer is the native proxy-backed reference; test-quality runs the `j5-test-quality` skill. Harness entry prompts live in manifest messages; native agents can use `instruction_file` |
+| `workflows/<team>/` | One team per directory under `workflows/` (the launcher scans only there): `team.yaml` (native models/tools or Claude Code harness agents), `workflow.yaml` (launcher manifest), `helpers/` + `bin/`, optional `instructions/`. issue-team (sub-agents, shell, typed tools) and pr-reviewer are native teams on the local Pi proxy; test-quality runs the `j5-test-quality` skill and is the one Claude Code harness team left. Harness entry prompts live in manifest messages; native agents use `instruction_file` |
 | `launcher/src/` | The `j5` CLI (Bun + TypeScript). `cli.ts` is the entry and gathers choices; `plan.ts` builds the git steps and docker-agent command and has no side effects; `run.ts` executes plans (single runs, and queue runs: one unattended run per item); `queue.ts` is the queue's pure logic (parsing, outcomes from the `RESULT:` line, summary). Also the code team helpers share (`team-helper.ts`, `change-diff.ts`, `test-prescreen.ts`), so no team imports another |
 | `launcher/test/` | bun:test tests; real temporary git repositories, no module mocks |
 | `skills/` | Agent skills shipped with the teams (`j5-test-quality`); the installer copies them to `~/.agents/skills/` |
@@ -40,7 +40,7 @@ Native pr-reviewer validation needs a non-empty `PI_PROXY_AUTH_TOKEN`; use the r
 ## Conventions
 
 - Type-aware lint is on (`lint.options.typeAware` in vite.config.ts). When a finding comes from a wrong third-party type, fix the type you read it through (see `isTerminal` in `launcher/src/cli.ts`) instead of disabling the rule.
-- Formatting: `vp fmt` covers TS/JS/JSON only. Markdown and YAML are excluded on purpose (`fmt.ignorePatterns`): agent prompts (`workflow.yaml` messages, `roles/*.md`) and `team.yaml` are hand-formatted model input.
+- Formatting: `vp fmt` covers TS/JS/JSON only. Markdown and YAML are excluded on purpose (`fmt.ignorePatterns`): agent prompts (`workflow.yaml` messages, `instructions/*.md`) and `team.yaml` are hand-formatted model input.
 - Verbose names, no abbreviations; comments carry *why*. Named constants instead of magic values.
 - Tests: say what bug each test catches. No `mock.module`; inject paths and use real git repositories (`launcher/test/fixtures.ts`).
 - Imports from outside `launcher/` into it use the `package.json` `imports` aliases: `#launcher/<file>.ts` for `launcher/src/`, `#launcher-test/<file>.ts` for `launcher/test/`. Files inside `launcher/` import each other relatively. The `#` prefix, not `@`, keeps the formatter from sorting these among npm packages. An alias import is still code outside the team directory: a sandboxed run mounts only the team directory, so a helper that uses one cannot run there (#14).

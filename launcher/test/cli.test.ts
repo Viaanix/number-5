@@ -34,21 +34,29 @@ afterAll(removeTemporaryDirectories);
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, "..", "..");
 const CLI_PATH = join(REPOSITORY_ROOT, "launcher", "src", "cli.ts");
-const ISSUE_TEAM_DIRECTORY = join(REPOSITORY_ROOT, "workflows", "issue-team");
-const ISSUE_TEAM_CONFIG = join(ISSUE_TEAM_DIRECTORY, "team.yaml");
-const ISSUE_TEAM_BIN = join(ISSUE_TEAM_DIRECTORY, "bin");
-const ISSUE_TEAM_MANIFEST = loadManifest(join(ISSUE_TEAM_DIRECTORY, "workflow.yaml"));
+const TEAMS_DIRECTORY = join(REPOSITORY_ROOT, "workflows");
+const ISSUE_TEAM_NAME = "issue-team";
+const PR_REVIEWER_NAME = "pr-reviewer";
+
+const ISSUE_TEAM_MANIFEST = loadManifest(join(TEAMS_DIRECTORY, ISSUE_TEAM_NAME, "workflow.yaml"));
+const MANIFESTS_BY_TEAM = {
+  [ISSUE_TEAM_NAME]: ISSUE_TEAM_MANIFEST,
+  [PR_REVIEWER_NAME]: loadManifest(join(TEAMS_DIRECTORY, PR_REVIEWER_NAME, "workflow.yaml")),
+};
+const ISSUE_TEAM_CONFIG = ISSUE_TEAM_MANIFEST.teamConfigPath;
+const ISSUE_TEAM_BIN = join(TEAMS_DIRECTORY, ISSUE_TEAM_NAME, "bin");
 
 // The first message j5 must send: the entry point's whole prompt from the real
 // manifest, filled. Read rather than copied, so the tests follow prompt edits but
 // still fail when the launcher sends anything else.
 function expectedFirstMessage(
+  teamName: keyof typeof MANIFESTS_BY_TEAM,
   entryPointName: string,
   parameterValues: Record<string, string>,
 ): string {
-  const entryPoint = ISSUE_TEAM_MANIFEST.entrypoints[entryPointName];
+  const entryPoint = MANIFESTS_BY_TEAM[teamName].entrypoints[entryPointName];
   if (entryPoint === undefined) {
-    throw new Error(`issue-team has no entry point ${entryPointName}`);
+    throw new Error(`${teamName} has no entry point ${entryPointName}`);
   }
   return fillTemplate(entryPoint.message, parameterValues);
 }
@@ -73,13 +81,14 @@ function expectedWorktreePath(projectRoot: string, worktreeName: string): string
 // The --print line for an expected plan, in this platform's dialect. The renderer has
 // its own tests; these pin which steps and words the launcher puts in the plan.
 function expectedPrintedCommand(
+  teamName: keyof typeof MANIFESTS_BY_TEAM,
   preparationSteps: string[][],
   workingDirectory: string,
   commandWords: string[],
 ): string {
   return renderPlanAsShellCommand(
     { preparationSteps, commandWords, workingDirectory, pathEnvironment: "" },
-    [ISSUE_TEAM_BIN],
+    MANIFESTS_BY_TEAM[teamName].pathDirectories,
     shellDialectForPlatform(process.platform),
   );
 }
@@ -116,6 +125,7 @@ describe("j5 --print", () => {
     expect(result).toEqual({
       exitCode: 0,
       standardOutput: expectedPrintedCommand(
+        ISSUE_TEAM_NAME,
         [
           ["git", "-C", root, "fetch", "origin", FIXTURE_DEFAULT_BRANCH],
           [
@@ -140,7 +150,7 @@ describe("j5 --print", () => {
           "root",
           "--working-dir",
           worktreePath,
-          expectedFirstMessage("work-issue", { issue: "12" }),
+          expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "12" }),
         ],
       ),
       standardError: "",
@@ -152,12 +162,12 @@ describe("j5 --print", () => {
   test("--project, --base, --effort and passthrough flags all reach the command", () => {
     const { projectRoot } = createFixtureProject("flags-app");
     const elsewhere = createTemporaryDirectory();
-    const worktreePath = expectedWorktreePath(projectRoot, "flags-app-closeout-pr-7");
+    const worktreePath = expectedWorktreePath(projectRoot, "flags-app-issue-7");
     const result = runCli(
       [
         "issue-team",
-        "closeout",
-        "--pr=7",
+        "work-issue",
+        "--issue=7",
         `--project=${projectRoot}`,
         "--base",
         `origin/${FIXTURE_FEATURE_BRANCH}`,
@@ -175,56 +185,46 @@ describe("j5 --print", () => {
       `fetch origin ${quoteForThisPlatform(FIXTURE_FEATURE_BRANCH)}`,
     );
     expect(result.standardOutput).toEndWith(
-      `--agent closeout --flavor low --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage("closeout", { pr: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
+      `--agent root --flavor low --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
     );
   });
 
-  // Catches a PR worktree that is not on the PR's own branch, found without gh: the
-  // fixture origin is a local bare repository with no GitHub behind it.
-  test("pr-followup: finds the PR's branch with git and adds a worktree tracking it", () => {
-    const { projectRoot } = createFixtureProject("followup-app");
+  // Catches a PR review worktree that is not on the fetched PR head, found without gh:
+  // the fixture origin is a local bare repository with no GitHub behind it.
+  test("pr-reviewer review: finds the PR's branch with git and adds a detached worktree at its head", () => {
+    const { projectRoot } = createFixtureProject("review-app");
     const branchName = addPullRequestToOrigin(projectRoot, 7);
     const root = canonicalPath(projectRoot);
-    const worktreePath = expectedWorktreePath(projectRoot, "followup-app-pr-7");
-    const result = runCli(["issue-team", "pr-followup", "--pr", "7", "--print"], projectRoot);
+    const worktreePath = expectedWorktreePath(projectRoot, "review-app-pr-7-detached");
+    const result = runCli(["pr-reviewer", "review", "--pr", "7", "--print"], projectRoot);
     expect(result).toEqual({
       exitCode: 0,
       standardOutput: expectedPrintedCommand(
+        PR_REVIEWER_NAME,
         [
           ["git", "-C", root, "fetch", "origin", branchName],
-          [
-            "git",
-            "-C",
-            root,
-            "worktree",
-            "add",
-            "--track",
-            "-b",
-            branchName,
-            worktreePath,
-            `origin/${branchName}`,
-          ],
+          ["git", "-C", root, "worktree", "add", "--detach", worktreePath, "FETCH_HEAD"],
         ],
         worktreePath,
         [
           "docker",
           "agent",
           "run",
-          ISSUE_TEAM_CONFIG,
+          MANIFESTS_BY_TEAM[PR_REVIEWER_NAME].teamConfigPath,
           "--agent",
-          "followup",
+          "reviewer",
           "--working-dir",
           worktreePath,
-          expectedFirstMessage("pr-followup", { pr: "7" }),
+          expectedFirstMessage(PR_REVIEWER_NAME, "review", { pr: "7" }),
         ],
       ),
       standardError: "",
     });
   });
 
-  test("pr-followup: reports a PR number origin does not have", () => {
+  test("pr-reviewer review: reports a PR number origin does not have", () => {
     const { projectRoot } = createFixtureProject("missing-pr-app");
-    const result = runCli(["issue-team", "pr-followup", "--pr", "8", "--print"], projectRoot);
+    const result = runCli(["pr-reviewer", "review", "--pr", "8", "--print"], projectRoot);
     expect(result.exitCode).not.toBe(0);
     expect(result.standardOutput).toBe("");
     expect(result.standardError).toContain("origin has no pull request #8");
@@ -288,19 +288,11 @@ describe("j5 in a terminal", () => {
   test("asks for a missing parameter as Need input: <label>", async () => {
     const { projectRoot } = createFixtureProject("prompt-app");
     const result = await runCliInTerminal(
-      [
-        "issue-team",
-        "closeout",
-        "--effort",
-        "low",
-        "--base",
-        `origin/${FIXTURE_DEFAULT_BRANCH}`,
-        "--print",
-      ],
+      ["pr-reviewer", "review", "--effort", "low", "--print"],
       projectRoot,
     );
     expect(result.timedOut).toBe(true);
-    expect(result.screenText).toContain("Need input: Merged pull request number");
+    expect(result.screenText).toContain("Need input: Pull request number");
   });
 
   // Catches a queue-capable entry point that never offers the queue in a terminal,
@@ -372,7 +364,7 @@ describe("j5 usage errors", () => {
       "unknown option(s) for issue-team work-issue: --pr",
     ],
     [
-      ["issue-team", "pr-followup", "--pr", "3", "--base", "origin/x"],
+      ["pr-reviewer", "review", "--pr", "3", "--base", "origin/x"],
       "--base only applies to entry points that create a new worktree",
     ],
     [
@@ -426,7 +418,7 @@ describe("j5 launching", () => {
         "root",
         "--working-dir",
         worktreePath,
-        expectedFirstMessage("work-issue", { issue: "5" }),
+        expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "5" }),
       ],
     };
 
@@ -490,34 +482,6 @@ describe("j5 detached PR reviews", () => {
     expect(runGit(projectRoot, ["rev-parse", "HEAD"])).toBe(sourceHead);
     expect(runGit(projectRoot, ["status", "--porcelain"])).toBe(sourceStatus);
     expect(readFileSync(localNotesPath, "utf8")).toBe("local work must survive\n");
-  });
-
-  test("keeps detached reviews separate from editable PR follow-up worktrees", () => {
-    const { projectRoot } = createFixtureProject("separate-review-app");
-    const branchName = addPullRequestToOrigin(projectRoot, 9);
-    const pullRequestHead = runGit(projectRoot, ["rev-parse", `origin/${branchName}`]);
-    const review = runCli(
-      ["pr-reviewer", "review", "--pr", "9"],
-      projectRoot,
-      launchEnvironmentPath,
-    );
-    const followup = runCli(
-      ["issue-team", "pr-followup", "--pr", "9"],
-      projectRoot,
-      launchEnvironmentPath,
-    );
-    const reviewWorktree = expectedWorktreePath(projectRoot, "separate-review-app-pr-9-detached");
-    const editableWorktree = expectedWorktreePath(projectRoot, "separate-review-app-pr-9");
-
-    expect(review.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
-    expect(followup.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
-    expect(runGit(reviewWorktree, ["rev-parse", "HEAD"])).toBe(pullRequestHead);
-    expect(runGit(reviewWorktree, ["branch", "--show-current"])).toBe("");
-    expect(runGit(editableWorktree, ["branch", "--show-current"])).toBe(branchName);
-    expect(runGit(editableWorktree, ["rev-parse", "--abbrev-ref", "@{upstream}"])).toBe(
-      `origin/${branchName}`,
-    );
-    expect(runGit(projectRoot, ["branch", "--show-current"])).toBe(FIXTURE_DEFAULT_BRANCH);
   });
 });
 
@@ -643,8 +607,16 @@ describe("j5 queue", () => {
     expect(existsSync(join(projectRoot, ".j5"))).toBe(false);
   });
 
+  // Catches a queue run without --max-rounds prompting or erroring instead of using
+  // the default limit.
+  test("--print without --max-rounds sends the default limit of 5 fix rounds", () => {
+    const { projectRoot } = createFixtureProject("queue-default-rounds-app");
+    const result = runCli(["issue-team", "work-issue", "--queue", "7,8", "--print"], projectRoot);
+    expect(result.exitCode).toBe(0);
+    expect(result.standardOutput).toContain("at most 5 fix rounds");
+  });
+
   test.each([
-    [["--queue", "1,2"], "missing --max-rounds <n|none> (fix rounds per queue item)"],
     [
       ["--queue", "1", "--queue-label", "ready", "--max-rounds", "2"],
       "--queue and --queue-label are alternatives",
@@ -666,11 +638,11 @@ describe("j5 queue", () => {
   });
 
   test("refuses --queue for an entry point without a queue", () => {
-    const { projectRoot } = createFixtureProject("queue-closeout-app");
-    const result = runCli(["issue-team", "closeout", "--queue", "1,2", "--print"], projectRoot);
+    const { projectRoot } = createFixtureProject("queue-review-app");
+    const result = runCli(["pr-reviewer", "review", "--queue", "1,2", "--print"], projectRoot);
     expect(result.exitCode).toBe(EXIT_CODE_USAGE);
     expect(result.standardError).toContain(
-      "only apply to entry points with a queue; closeout has none",
+      "only apply to entry points with a queue; review has none",
     );
   });
 });
@@ -682,8 +654,6 @@ describe("j5 list and help", () => {
     // The flavor header sits above the real listing, which must still follow it.
     expect(result.standardOutput).toStartWith("Input! Input!\n\nissue-team — ");
     expect(result.standardOutput).toContain("  work-issue --issue <integer>");
-    expect(result.standardOutput).toContain("  pr-followup --pr <integer>");
-    expect(result.standardOutput).toContain("  closeout --pr <integer>");
     expect(result.standardOutput).toContain("  efforts: low");
   });
 

@@ -26,21 +26,11 @@ Default data directory: `~/.cagent` (sessions, worktrees under `~/.cagent/worktr
 
 ## team.yaml keys used here
 
-Keys used by native model agents, including pr-reviewer. issue-team and test-quality remain `harness: claude-code` teams, for which `instruction_file`, `toolsets`, `skills`, `sub_agents`, `add_prompt_files` and `permissions` have no effect ([gotcha](gotchas.md#a-harness-claude-code-agent-gets-none-of-docker-agents-agent-extras)). Comments come from `--help`, the team READMEs and receipts in [gotchas.md](gotchas.md); `docker agent debug config` is the check when in doubt.
+Keys used by native model agents, including issue-team and pr-reviewer. test-quality remains a `harness: claude-code` team, for which `instruction_file`, `toolsets`, `skills`, `sub_agents`, `add_prompt_files` and `permissions` have no effect ([gotcha](gotchas.md#a-harness-claude-code-agent-gets-none-of-docker-agents-agent-extras)). Comments come from `--help`, the team READMEs and receipts in [gotchas.md](gotchas.md); `docker agent debug config` is the check when in doubt.
 
 ```yaml
 models:                       # named model configs, referenced by agents
   lead: { provider: anthropic, model: claude-sonnet-5 }
-
-toolsets:                     # shared toolsets, attached with use_toolsets
-  pr_threads:
-    type: script
-    shell:
-      pr_threads:
-        cmd: issue-team-pr-threads "$pr"     # resolved through PATH
-        description: …
-        args: { pr: { type: integer, description: … } }
-        required: [pr]
 
 agents:
   root:                       # the first agent is the default for `run`
@@ -50,8 +40,6 @@ agents:
     add_prompt_files: [AGENTS.md, CLAUDE.md] # from the working directory
     add_environment_info: true
     sub_agents: [builder, tester, reviewer]  # reached with transfer_task
-    use_toolsets: [pr_threads]
-    skills: [j5-test-quality]
     toolsets:
       - type: shell
       - type: filesystem
