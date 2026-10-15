@@ -34,12 +34,23 @@ agents:
         shell:
           pr_context:
             cmd: pr-reviewer-context
-            description: Verifies the requested PR head, clean checkout and available merge base; returns PR metadata, changed paths and the complete local diff. Refuses stale or dirty checkouts without changing them.
+            description: Verifies the requested PR head, clean checkout and available merge base; returns a bounded overview with PR metadata, the pinned head/base/merge-base OIDs, and the page count and fingerprint of the full diff. Refuses stale or dirty checkouts without changing them.
             args:
               pr:
                 type: integer
                 description: Positive pull request number requested by the user
             required: [pr]
+          pr_diff:
+            cmd: pr-reviewer-diff
+            description: Returns one numbered page of the verified PR's changed paths, diff stat and full merge-base diff. Read every page from 1 through the page count reported by pr_context. Refuses stale or dirty checkouts without changing them.
+            args:
+              pr:
+                type: integer
+                description: Positive pull request number requested by the user
+              page:
+                type: integer
+                description: Page number, from 1 through the page count reported by pr_context
+            required: [pr, page]
 
 flavors:
   low:

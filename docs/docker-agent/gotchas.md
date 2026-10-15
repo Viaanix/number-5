@@ -123,6 +123,29 @@ compatibility. Keep model-specific request settings explicit and verify the tool
 loop, not only model discovery. This receipt does not establish signed-history
 portability or thinking visibility through an OpenAI translator.
 
+### A script tool result over 51,200 bytes is cut to its tail
+
+**Observed:** Docker Agent v1.145.0, Linux, 2026-10-15, real run of
+`j5 pr-reviewer review --pr 124` (native script tool, `--exec` not used).
+
+**Receipt:** the tool returned 110,548 bytes. docker-agent replied with:
+
+```text
+Tool call result was too large (110548 bytes; limit 51200 bytes). The full result
+is available in a file: /tmp/docker-agent-tool-results/<id>/tool-result-<n>.txt
+Showing the last 2000 lines (up to 51200 bytes):
+```
+
+The model saw only the **end** of the output. The start, which held the metadata
+and commit IDs, was gone, and the saved file was outside the agent's filesystem
+allow-list, so a read of it failed with `outside the allowed directory`.
+
+**Consequence:** a tool that can return a large result must page it itself, with
+every page under the limit and a fingerprint tying the pages together. Put the
+identifying facts in a small result, not at the start of a big one. A test with a
+small fixture will not catch this. Also: `git diff --unified=N --stat` prints the
+patch after the stat, so a stat command must not carry patch-implying options.
+
 ### Read-only native filesystem tools can enforce a checkout boundary
 
 **Observed:** Docker Agent v1.145.0 on Linux, Haiku 5.5 through the proxy above,
@@ -140,7 +163,7 @@ read_file(<allowed-root>/outside-link) -> isError: true, outside the allowed dir
 
 Neither response returned the sentinel contents. `debug toolsets --json` for
 pr-reviewer separately listed only its configured read-only filesystem/git
-tools and `pr_context`, with no shell or write tools.
+tools, `pr_context` and `pr_diff`, with no shell or write tools.
 
 **Consequence:** native tool restrictions remain active with autonomous tool
 approval. This is not an OS sandbox or a secret filter: files inside the

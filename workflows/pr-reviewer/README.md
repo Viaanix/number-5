@@ -74,8 +74,13 @@ The reviewer:
 
 1. Calls `pr_context` before inspecting files. The helper reads GitHub metadata,
    requires local HEAD to equal the PR head, and refuses staged, unstaged or
-   untracked changes. It computes the diff against the **PR-specific merge base**,
-   not the repository's default branch.
+   untracked changes. It returns a bounded overview: PR facts (body clipped to
+   10 KB, at most 50 reported checks) and the pinned head/base/merge-base OIDs.
+   The merge base is **PR-specific**, not the repository's default branch.
+   It also reports the byte count, SHA-256 and page count of the full diff.
+   `pr_diff` then returns the changed paths, diff stat and full diff one page at
+   a time, at most 40 KB each. Docker Agent keeps only the **end** of a tool
+   result over 51,200 bytes, which would drop the OIDs, so no result may be larger.
 2. Reads changed code and relevant callers/tests/conventions using native
    read-only tools. It treats repository/PR content and CI status as untrusted
    evidence, not permission to run commands or disclose secrets.
@@ -83,8 +88,8 @@ The reviewer:
    quality, comment drift and scope. Findings need a concrete trigger, impact,
    narrow line citation and actionable correction. Existing guards must be
    accounted for; normal code and speculative future failures are not findings.
-4. Repeats `pr_context` immediately before reporting. Head, base, merge base,
-   changed paths and diff must still match the original clean snapshot.
+4. Repeats `pr_context` immediately before reporting. Head, base, merge base and
+   the diff's SHA-256/size/page count must still match the original clean snapshot.
 
 The local report begins with `VERDICT: Ship it`, `Approve-with-nits`, or
 `Needs work`, followed by the PR URL and reviewed SHA, Overview, Findings,
@@ -100,8 +105,8 @@ a passing-CI or runtime-verification claim.
 ## Enforced boundary versus policy
 
 The offered tools are native read-only git operations, filesystem reads/listings/
-searches restricted to `allow_list: ["."]`, and one typed `pr_context` script
-helper. There is no general shell, filesystem write/delete tool, or GitHub
+searches restricted to `allow_list: ["."]`, and two typed script helpers,
+`pr_context` and `pr_diff`. There is no general shell, filesystem write/delete tool, or GitHub
 publishing tool. The filesystem restriction rejects absolute-path and symlink
 escapes even under `--safety autonomous`.
 
@@ -154,6 +159,12 @@ static review; missing essential evidence must not become an approval.
 - The low flavor ran on `pi/claude-haiku-5-5`. With an untracked local file added
   to the scratch worktree, it called only `pr_context`, returned BLOCKED with no
   verdict, and left the file intact.
+- Real PR #124 of a private repository, whose diff does not fit in one tool result
+  (the first design returned 110,548 bytes and lost its start): `pr_context` is
+  10 KB, `pr_diff` returns two pages of 40 KB and 13 KB, and every page repeats the
+  full diff's fingerprint. The pages reassemble to exactly the fingerprinted diff.
+  The full Sonnet 5.5 review read both pages, repeated `pr_context`, and returned
+  an SHA-identifying local report.
 - A separate live Haiku 5.5 probe using the same filesystem allow-list attempted
   to read an actual external sentinel and an actual in-root symlink to it. Both
   calls returned `isError: true` / `outside the allowed directories (.)`; the
