@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -12,6 +12,10 @@ const COPIES: [string, string][] = [
   ["j5-test-quality.md", "SKILL.md"],
   ["generate.md", join("workflows", "generate.md")],
   ["review-single.md", join("workflows", "review-single.md")],
+  ["mock-antipatterns.md", join("checklists", "mock-antipatterns.md")],
+  ["fig-leaf-signals.md", join("checklists", "fig-leaf-signals.md")],
+  ["pre-claim.md", join("checklists", "pre-claim.md")],
+  ["assertion-shape.md", join("references", "assertion-shape.md")],
 ];
 
 describe("issue-team's copies of the j5-test-quality skill", () => {
@@ -25,5 +29,13 @@ describe("issue-team's copies of the j5-test-quality skill", () => {
       readFileSync(copyPath, "utf8") === readFileSync(sourceFullPath, "utf8"),
       `refresh it: cp ${sourceFullPath} ${copyPath}`,
     ).toBe(true);
+  });
+
+  // Catches a copy left behind after it was dropped from the list (nothing checks it against
+  // its source any more, so it would go stale while still looking like part of the skill).
+  test("the copy directory holds exactly the listed files", () => {
+    expect(readdirSync(COPY_DIRECTORY).toSorted()).toEqual(
+      COPIES.map(([copyName]) => copyName).toSorted(),
+    );
   });
 });

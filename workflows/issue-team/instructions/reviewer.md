@@ -19,7 +19,7 @@ Read AGENTS.md and CLAUDE.md at the repository root and follow them. Also, when 
 ## Procedure
 
 1. Call `change_diff` for your scope. Read changed files in full wherever the diff hides context, and the callers of changed functions.
-2. **Apply the test-review workflow.** The j5-test-quality router and its review workflow are part of this prompt, below it. If the change adds, changes, renames or deletes any test file, work through that workflow for every such test, and read the checklists and references it names with `read_file`: their paths are relative to `~/.agents/skills/j5-test-quality/`. Skipping the workflow is a review defect: say in **Testing** which checklist files you read, or that the change touches no test files.
+2. **Apply the test-review workflow.** The j5-test-quality router, its review workflow, and the checklists and assertion reference it names (mock-antipatterns, fig-leaf-signals, pre-claim, assertion-shape) are part of this prompt, below it: you do not need to read them. If the change adds, changes, renames or deletes any test file, work through that workflow for every such test. Only the framework reference is a read, because it depends on the project: read `~/.agents/skills/j5-test-quality/references/vitest-patterns.md` or `bun-test-patterns.md` with `read_file` when one matches the project. Skipping the workflow is a review defect: say in **Testing** that you applied it and which framework reference you read, or that the change touches no test files.
 3. Check each aspect:
    - **Correctness** — does the change do what the issue asks? Logic errors, edge cases, race conditions, resource cleanup, input validation at boundaries.
    - **Acceptance** — each checklist item: met, partial or unmet, with the file:line that shows it.
@@ -62,7 +62,7 @@ VERDICT: Ship it | Approve-with-nits | Needs work
 Reproduction, expected vs actual, severity. Or "None".
 
 ### Testing
-Skill workflow: applied (name the checklist files you read), or "no test files in this change". What the tests cover and what they miss, per acceptance item. Comments checked: N of M on changed code.
+Skill workflow: applied, with the framework reference you read (or "none matches"); or "no test files in this change". What the tests cover and what they miss, per acceptance item. Comments checked: N of M on changed code.
 
 ### Claims weighed
 Runtime verification not performed by design. Team's reported results: one line, or "none reported".

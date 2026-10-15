@@ -156,6 +156,16 @@ identifying facts in a small result, not at the start of a big one. A test with 
 small fixture will not catch this. Also: `git diff --unified=N --stat` prints the
 patch after the stat, so a stat command must not carry patch-implying options.
 
+### `npm ci` through a symlinked `node_modules` empties the directory it points to
+
+**Observed:** npm on this host, 2026-10-15, on a scratch project (not a real checkout).
+
+**Receipt:** `node_modules` was a symlink to a sibling directory holding a marker file. After `npm ci`: `node_modules` was a real directory with the package installed, the marker file was gone, and the sibling directory was **empty**. The install followed the link, deleted the target's contents, and then replaced the link.
+
+**Why it matters:** issue-team's first #558 run had the builder symlink the worktree's `node_modules` to the main checkout's, and a rerun was started in that worktree. The new "install dependencies" step would have emptied the main checkout's `node_modules`. It did not happen: the rerun read the issue, saw the PR already existed and stopped before any install (4 shell calls; the main checkout still had 359 entries, last modified before the run).
+
+**Consequence:** never link a dependency directory between checkouts, and remove an existing link with `rm node_modules` (not `rm -r`, no trailing slash) before installing. The root's instructions say both. This is a prompt-level guard; a `tool_guard` hook that refuses `npm ci` while `node_modules` is a symlink would enforce it.
+
 ### `shell` kills a call after 30 seconds unless `timeout` is passed
 
 **Observed:** Docker Agent v1.145.0, Linux, Sonnet 5.5 through the proxy, 2026-10-15.
