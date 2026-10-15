@@ -2,7 +2,8 @@
 // carries the snapshot OIDs and the whole stream's fingerprint, so a page from a
 // different snapshot is detectable. Read-only: never refresh or repair the checkout.
 
-import { HelperUsageError, runHelper } from "../../../launcher/src/team-helper.ts";
+import { HelperUsageError, runHelper } from "#launcher/team-helper.ts";
+
 import {
   buildDiffStream,
   fingerprint,

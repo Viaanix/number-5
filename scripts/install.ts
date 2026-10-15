@@ -30,7 +30,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { quoteForPosixShell, quoteForPowerShell } from "../launcher/src/shell-quote.ts";
+import { quoteForPosixShell, quoteForPowerShell } from "#launcher/shell-quote.ts";
 
 /** Marker lines around the installed block. Unchanged from the bash installer, so
  * blocks it wrote are found and replaced. */

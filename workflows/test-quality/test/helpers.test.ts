@@ -17,7 +17,7 @@ import {
   runGit,
   runHelperScriptFile,
   runThroughDockerAgentShell,
-} from "../../../launcher/test/fixtures.ts";
+} from "#launcher-test/fixtures.ts";
 
 afterAll(removeTemporaryDirectories);
 

@@ -2,7 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { removeTemporaryDirectories } from "../../../launcher/test/fixtures.ts";
+import { removeTemporaryDirectories } from "#launcher-test/fixtures.ts";
+
 import { MAX_COMMENT_CHARACTERS } from "../helpers/report.ts";
 import { commitFile, createReviewProject, type ReviewProject } from "./review-project.ts";
 

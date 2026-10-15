@@ -33,4 +33,4 @@ j5                         # or pick everything interactively
 
 ## Development
 
-`bun run check` runs typecheck, oxlint, oxfmt, shellcheck, the bun tests and team validation. CI runs all of it on Linux; macOS runs everything except team validation; Windows runs typecheck, oxlint, oxfmt and the bun tests (`.github/workflows/check.yml`). Details in [CLAUDE.md](CLAUDE.md).
+`bun run check` runs typecheck, lint and format checks (Oxlint and Oxfmt through [Vite+](https://viteplus.dev), configured in `vite.config.ts`), shellcheck, the bun tests and team validation. CI runs all of it on Linux; macOS runs everything except team validation; Windows runs typecheck, lint, format and the bun tests (`.github/workflows/check.yml`). Each commit also runs `vp check --fix` on the staged files through a pre-commit hook. Details in [CLAUDE.md](CLAUDE.md).

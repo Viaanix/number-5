@@ -13,7 +13,7 @@ import {
   createTemporaryDirectory,
   removeTemporaryDirectories,
   runGit,
-} from "../launcher/test/fixtures.ts";
+} from "#launcher-test/fixtures.ts";
 
 afterAll(removeTemporaryDirectories);
 

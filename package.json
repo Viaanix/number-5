@@ -2,16 +2,21 @@
   "name": "number-5",
   "private": true,
   "type": "module",
+  "imports": {
+    "#launcher/*": "./launcher/src/*",
+    "#launcher-test/*": "./launcher/test/*"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --deny-warnings",
-    "lint:fix": "oxlint --fix && oxfmt",
-    "format": "oxfmt",
-    "format:check": "oxfmt --check",
+    "lint": "vp lint --deny-warnings",
+    "lint:fix": "vp lint --fix && vp fmt",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
     "lint:shell": "bash scripts/lint-shell.sh",
     "test": "bun test --timeout=30000",
     "validate:teams": "bun scripts/validate-teams.ts",
-    "check": "bun run typecheck && bun run lint && bun run format:check && bun run lint:shell && bun run test && bun run validate:teams"
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run lint:shell && bun run test && bun run validate:teams",
+    "prepare": "vp config"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
@@ -19,9 +24,11 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",
-    "oxfmt": "^0.73.0",
-    "oxlint": "^1.88.0",
-    "oxlint-tsgolint": "^7.0.2004",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.2.0",
+    "vite-plus": "1.2.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.2.0"
   }
 }

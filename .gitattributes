@@ -1,5 +1,5 @@
 # Check out every text file with LF, on every OS. Without this, Git for Windows
-# (core.autocrlf=true by default) converts to CRLF: oxfmt --check then flags every
+# (core.autocrlf=true by default) converts to CRLF: vp fmt --check then flags every
 # file, and shell scripts with CRLF fail under Git Bash ("$'\r': command not found").
 * text=auto eol=lf
 

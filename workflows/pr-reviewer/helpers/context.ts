@@ -3,7 +3,8 @@
 // docker-agent drops the start of any tool result over 51200 bytes. Read-only: never
 // refresh or repair the checkout.
 
-import { runHelper } from "../../../launcher/src/team-helper.ts";
+import { runHelper } from "#launcher/team-helper.ts";
+
 import {
   buildDiffStream,
   describePullRequest,

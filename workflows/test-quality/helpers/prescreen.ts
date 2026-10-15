@@ -10,12 +10,8 @@
 // The argument is `target`, not `path`: Windows environment variable names are
 // case-insensitive, so a tool argument named `path` would replace PATH.
 
-import {
-  HelperUsageError,
-  readToolArgument,
-  runHelper,
-} from "../../../launcher/src/team-helper.ts";
-import { runTestPrescreen } from "../../../launcher/src/test-prescreen.ts";
+import { HelperUsageError, readToolArgument, runHelper } from "#launcher/team-helper.ts";
+import { runTestPrescreen } from "#launcher/test-prescreen.ts";
 
 runHelper("test-quality-prescreen", () => {
   const target = readToolArgument("target");

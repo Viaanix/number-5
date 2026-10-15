@@ -3,8 +3,8 @@
 // command line or the environment (docker-agent's change_diff tool sets it as an
 // environment variable).
 
-import { formatChangeDiff } from "../../../launcher/src/change-diff.ts";
-import { readToolArgument, runHelper } from "../../../launcher/src/team-helper.ts";
+import { formatChangeDiff } from "#launcher/change-diff.ts";
+import { readToolArgument, runHelper } from "#launcher/team-helper.ts";
 
 runHelper("issue-team-change-diff", () => {
   process.stdout.write(formatChangeDiff(readToolArgument("since")));
