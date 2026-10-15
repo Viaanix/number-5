@@ -22,6 +22,11 @@ updating this checkout, run `docker compose up --wait` from
 existing login volume is retained. If the token is saved but not exported, use
 `docker compose --env-file "$HOME/.config/cagent/.env" up --wait` instead.
 
+With multiple GitHub accounts, check `gh api user --jq .login` and select the
+account that can read the target repository using
+`gh auth switch --hostname github.com --user ACCOUNT`. This uses an existing
+saved login; git's SSH host alias does not select the GitHub CLI account.
+
 From the project checkout:
 
 ```bash
