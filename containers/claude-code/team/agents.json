@@ -1,0 +1,8 @@
+{
+  "reviewer": {
+    "description": "Read-only code reviewer for the spike",
+    "prompt": "You are a code reviewer. Do what the user asks with the tools you have. If a tool you would need is missing, say so.",
+    "tools": ["Read", "Grep", "Glob"],
+    "model": "haiku"
+  }
+}
