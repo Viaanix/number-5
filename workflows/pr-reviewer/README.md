@@ -8,11 +8,19 @@ or run the project's tests/builds. Existing workflows are unchanged.
 ## Run
 
 Needs Bun, Docker Agent 1.145.0, git, `gh` authenticated for the target repository,
-and the proxy's local bearer secret exported as `PI_PROXY_AUTH_TOKEN`. This is
-not an Anthropic API key. Complete subscription login and start the container
-using its README. After updating this checkout, run `docker compose up --wait`
-from `containers/pi-openai-proxy/` to apply the current-model catalogue mount;
-the existing login volume is retained.
+and the proxy's local bearer secret available as `PI_PROXY_AUTH_TOKEN`: export
+it, or save it once in `~/.config/cagent/.env` with mode `0600` as described in
+the [proxy setup](../../containers/pi-openai-proxy/README.md#build-and-log-in).
+Docker Agent loads that file automatically in new terminals. This secret is not
+an Anthropic API key. Claude's subscription login is separately persisted in the
+container's `pi-auth` volume; neither login nor exporting the token is required
+for every review when both are saved.
+
+Complete subscription login and start the container using its README. After
+updating this checkout, run `docker compose up --wait` from
+`containers/pi-openai-proxy/` to apply the current-model catalogue mount; the
+existing login volume is retained. If the token is saved but not exported, use
+`docker compose --env-file "$HOME/.config/cagent/.env" up --wait` instead.
 
 From the project checkout:
 

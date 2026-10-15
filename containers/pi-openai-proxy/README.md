@@ -49,9 +49,25 @@ docker compose run --rm --no-deps --entrypoint bun proxy \
 ```
 
 `PI_PROXY_AUTH_TOKEN` is a local bearer secret protecting the proxy, **not an
-Anthropic API key**. Keep it outside the repository and export the same value in
-terminals that start the service or run Docker Agent. Compose refuses to start
-without a non-empty value.
+Anthropic API key**. Keep it outside the repository. Compose and Docker Agent
+must use the same value; generating a replacement while the proxy is running
+does not change the proxy's token. Compose refuses to start without a non-empty
+value.
+
+To avoid exporting the token in every Docker Agent terminal, save the existing
+value in `~/.config/cagent/.env`, which Docker Agent loads automatically.
+**Run this once, only if that file has no `PI_PROXY_AUTH_TOKEN` entry yet:**
+
+```bash
+mkdir -p "$HOME/.config/cagent"
+touch "$HOME/.config/cagent/.env"
+chmod 600 "$HOME/.config/cagent/.env"
+printf '\nPI_PROXY_AUTH_TOKEN=%s\n' "${PI_PROXY_AUTH_TOKEN:?Use the existing proxy bearer token}" >> "$HOME/.config/cagent/.env"
+```
+
+This preserves other entries. If the token already has an entry, reuse it rather
+than appending another one or generating a new value. Do not put this file in
+the repository. A missing local bearer token does not require another Claude login.
 
 Inside Pi, enter `/login`, select **Use a subscription**, then **Anthropic (Claude
 Pro/Max)**. Open the displayed authorization URL in your host browser. The login
@@ -77,6 +93,13 @@ docker compose up --wait
 curl --fail --silent --show-error http://127.0.0.1:4141/v1/models \
   --header "Authorization: Bearer $PI_PROXY_AUTH_TOKEN"
 docker compose logs proxy
+```
+
+Compose does not automatically read Docker Agent's env file. In a new terminal,
+you can start the service using the saved value without exporting it:
+
+```bash
+docker compose --env-file "$HOME/.config/cagent/.env" up --wait
 ```
 
 Only host loopback is published. To change the host port, export `PI_PROXY_PORT`
@@ -109,7 +132,7 @@ providers:
         reasoning_effort: high
 ```
 
-With the same local bearer secret exported:
+With the same local bearer secret exported or saved in Docker Agent's env file:
 
 ```bash
 docker agent models --provider pi
