@@ -98,7 +98,7 @@ entrypoints:
 
 **Templates.** `message` and `worktree.name` take `{placeholder}`s: any parameter, plus `{repo}` (the project's directory name). An unknown placeholder is a manifest error, never literal text in a prompt. `{{` and `}}` are literal braces, e.g. `gh api repos/{{owner}}/{{repo}}/pulls/{pr}` sends `repos/{owner}/{repo}/pulls/7`.
 
-**Harness versus native prompts.** For test-quality, a Claude Code harness team, the message is the whole prompt because Docker Agent gives a harness agent nothing else; use a YAML block (`message: |`). Native agents such as issue-team and pr-reviewer load a durable `instruction_file` from `team.yaml` and use the manifest message for task parameters. `--print` shows the manifest message, not native instruction-file contents.
+**Native versus harness prompts.** Native agents (every team here) load a durable `instruction_file` from `team.yaml` and use the manifest message for the task's parameters; `--print` shows the manifest message, not the instruction-file contents. A `harness: claude-code` agent would get nothing but the message, so its whole procedure would go there (use a YAML block, `message: |`); no team uses one now.
 
 **Worktree modes.**
 
