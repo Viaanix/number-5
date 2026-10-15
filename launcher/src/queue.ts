@@ -27,6 +27,9 @@ const OUTPUT_TAIL_CHARACTER_COUNT = 300;
 /** The fix-round limit for each item: a number of rounds, or none. */
 export type RoundLimit = { kind: "limited"; rounds: number } | { kind: "unlimited" };
 
+/** Fix rounds per item when a queue run gives no --max-rounds. */
+export const DEFAULT_ROUND_LIMIT: RoundLimit = { kind: "limited", rounds: 5 };
+
 /** How one queue item ended. */
 export type QueueItemOutcome =
   | { kind: "pull-request"; url: string }

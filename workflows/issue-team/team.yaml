@@ -1,45 +1,187 @@
-# Issue team: issue → PR → review follow-up → post-merge closeout, in any GitHub repository.
-# Entry points are in workflow.yaml; each starts one entry agent:
-#   root      work-issue <n>   fresh worktree from the remote default branch → opened PR
-#   followup  pr-followup <n>  worktree on the PR branch → fixes pushed, threads answered
-#   closeout  closeout <n>     fresh worktree at the latest default branch → verified, open threads filed as issues, issues closed
+# Issue team: GitHub issue → pull request, in any GitHub repository.
+# One entry point (workflow.yaml) starts the entry agent:
+#   root      work-issue <n>   fresh worktree from the remote default branch → a PR: ready when the
+#                              review and verification pass, a draft when they do not
 #
-# Every agent is Claude Code (`harness: claude-code`) on the user's Claude subscription;
-# no API key is needed. A harness agent receives only the task message: docker-agent
-# drops instruction files, toolsets, skills, sub_agents and permission rules for it
-# (docs/docker-agent/gotchas.md). So:
-#   - each entry agent's whole prompt is its entry point's `message` in workflow.yaml;
-#   - root and followup start builder, tester and reviewer with Claude Code's own
-#     sub-agent tool; the tester and reviewer prompts are roles/*.md, printed by
-#     `issue-team-role <role>`;
-#   - the helpers in bin/ are called through Claude Code's shell by bare name;
-#   - the publish gates and the "never force-push / merge" rules are instructions only.
-# Per-repository context comes from that repository's CLAUDE.md, which Claude Code reads.
-# `harness.model` picks the agent's Claude model (verified: a run with claude-haiku-4-5
-# shows that model in Claude Code's transcript). Without it, Claude Code uses the user's
-# own default model, which is not this repository's to decide.
+# Native docker-agent agents on the local Pi proxy (containers/pi-openai-proxy). The proxy
+# must be running, with PI_PROXY_AUTH_TOKEN available (export it, or save it in
+# ~/.config/cagent/.env). Nothing here uses the Claude Code harness.
+#   - each agent's procedure is an instruction_file in instructions/; workflow.yaml sends
+#     only the task ("Work issue #12");
+#   - root delegates to builder, tester and reviewer with transfer_task;
+#   - the reviewer has no shell and no write tools, so its read-only role is enforced;
+#   - the repository's own AGENTS.md / CLAUDE.md are loaded for every agent (add_prompt_files);
+#   - the typed tools below wrap the helpers in bin/, which workflow.yaml puts on PATH.
+providers:
+  pi:
+    base_url: http://127.0.0.1:4141/v1
+    api_type: openai_chatcompletions
+    token_key: PI_PROXY_AUTH_TOKEN
+
+# Docker Agent maps thinking_budget only for recognized OpenAI reasoning models; the proxy
+# accepts an explicit reasoning_effort for Claude's adaptive thinking instead. Every model
+# here needs one: without it the pinned adapter sends `thinking: disabled`, which
+# Sonnet 5.5 rejects.
+# The reviewer used to run on Opus. claude-opus-5-5 is not usable here: Anthropic answers
+# "Claude Code 2.1.75 does not support this model; version 2.1.280 or newer is required"
+# to the proxy's login, so every role uses Sonnet 5.5 (2026-10-15, docker-agent v1.145.0).
+models:
+  coordinator_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 16384
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+  builder_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 32768
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+  tester_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 32768
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+  reviewer_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 16384
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
 
 agents:
   root:
-    description: Owns one GitHub issue from a fresh worktree to an opened pull request
-    harness:
-      type: claude-code
-      model: claude-sonnet-5-5
-      effort: high
+    model: coordinator_model
+    description: Owns one GitHub issue from a fresh worktree to a pull request, a draft when the review or verification does not pass
+    instruction_file: instructions/work-issue.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 150
+    sub_agents: [builder, tester, reviewer]
+    toolsets:
+      - type: filesystem
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content, write_file]
+      - type: shell
+      - type: todo
 
-  followup:
-    description: Resolves review threads and failing checks on an existing pull request branch
-    harness:
-      type: claude-code
-      model: claude-sonnet-5-5
-      effort: high
+  builder:
+    model: builder_model
+    description: Implements code changes from a self-contained task; does not commit or push
+    instruction_file: instructions/builder.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 150
+    toolsets:
+      - type: filesystem
+        allow_list: ["."]
+      - type: shell
 
-  closeout:
-    description: After a pull request merges, verifies the default branch, files issues for its open review threads, and closes the linked issues with evidence
-    harness:
-      type: claude-code
-      model: claude-sonnet-5-5
-      effort: high
+  tester:
+    model: tester_model
+    description: Writes and audits tests, runs suites, never edits production code
+    # The skill's router, its generate workflow and the checklists it names are part of the prompt,
+    # so the method is always in context. instruction_file only accepts paths inside this
+    # directory, so these are copies of skills/j5-test-quality; test/skill-instructions.test.ts
+    # fails when one drifts. Only the framework reference stays a read: it depends on the project.
+    instruction_file:
+      - instructions/tester.md
+      - instructions/skill/j5-test-quality.md
+      - instructions/skill/generate.md
+      - instructions/skill/mock-antipatterns.md
+      - instructions/skill/fig-leaf-signals.md
+      - instructions/skill/pre-claim.md
+      - instructions/skill/assertion-shape.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 120
+    toolsets:
+      - type: filesystem
+        # The j5-test-quality skill is installed under the home directory by scripts/install.ts.
+        allow_list: [".", "~/.agents/skills/j5-test-quality"]
+      - type: shell
+      - type: script
+        shell:
+          test_prescreen:
+            cmd: issue-team-test-prescreen
+            description: Runs the j5-test-quality pre-screen on the test files changed since this branch left the remote default branch, including uncommitted changes and new files registered with `git add -N`. Reports HIGH findings as a failed call, and a failed run as an error.
+
+  reviewer:
+    model: reviewer_model
+    description: Independent, read-only review of the whole branch; has no shell and no write tools
+    # Same for the review workflow and its checklists: loaded for the reviewer, not left for it
+    # to remember to read.
+    instruction_file:
+      - instructions/reviewer.md
+      - instructions/skill/j5-test-quality.md
+      - instructions/skill/review-single.md
+      - instructions/skill/mock-antipatterns.md
+      - instructions/skill/fig-leaf-signals.md
+      - instructions/skill/pre-claim.md
+      - instructions/skill/assertion-shape.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 100
+    toolsets:
+      - type: filesystem
+        allow_list: [".", "~/.agents/skills/j5-test-quality"]
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
+      - type: git
+      - type: script
+        shell:
+          change_diff:
+            cmd: issue-team-change-diff
+            description: "Prints the change under review (the commits and diff since the branch left the remote default branch). With `since`, only the commits after that reviewed HEAD; it prints `scope: full` and the whole change when that commit is gone."
+            args:
+              since:
+                type: string
+                description: Optional full SHA of the last reviewed HEAD, for a re-review
+
+# Every tool an agent here has is pre-approved, so no run waits on a confirmation prompt
+# (`--exec` rejects an unapproved tool, as it does for pr-reviewer's pr_comment). Rules
+# are team-wide, not per agent, and `deny` wins over `allow`. Patterns match the whole
+# command and are case-insensitive, so they also catch a mention inside a quoted message.
+# This is defense in depth, not a boundary: shell can still run anything the patterns miss.
+permissions:
+  allow:
+    - shell
+    - read_file
+    - read_multiple_files
+    - list_directory
+    - directory_tree
+    - search_files_content
+    - write_file
+    - edit_file
+    - create_directory
+    - remove_directory
+    - create_todo
+    - create_todos
+    - update_todos
+    - list_todos
+    - git_status
+    - git_log
+    - git_branches
+    - git_show
+    - git_blame
+    - test_prescreen
+    - change_diff
+  deny:
+    - "shell:cmd=*sudo*"
+    - "shell:cmd=*--no-verify*"
+    - "shell:cmd=*git push*--force*"
+    - "shell:cmd=*git push* -f*"
+    - "shell:cmd=*git push*+*"
+    - "shell:cmd=*git reset*--hard*"
+    - "shell:cmd=*gh pr merge*"
+    - "shell:cmd=*gh pr ready*"
+    - "shell:cmd=*gh issue close*"
+    - "shell:cmd=*gh repo delete*"
+    - "shell:cmd=*gh release*"
 
 # Effort levels, chosen with `j5 issue-team ... --effort <name>` (docker agent run
 # --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
@@ -47,16 +189,24 @@ agents:
 # docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
 flavors:
   low:
-    agents:
-      root:
-        harness:
-          model: claude-haiku-4-5
-          effort: low
-      followup:
-        harness:
-          model: claude-haiku-4-5
-          effort: low
-      closeout:
-        harness:
-          model: claude-haiku-4-5
-          effort: low
+    models:
+      coordinator_model:
+        model: claude-haiku-5-5
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      builder_model:
+        model: claude-haiku-5-5
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      tester_model:
+        model: claude-haiku-5-5
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      reviewer_model:
+        model: claude-haiku-5-5
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium

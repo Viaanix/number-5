@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import {
   classifyQueueItem,
+  DEFAULT_ROUND_LIMIT,
   describeRoundLimit,
   everyItemSucceeded,
   formatQueueSummary,
@@ -42,6 +43,12 @@ describe("parseRoundLimit and describeRoundLimit", () => {
       problem: "--max-rounds must be a positive integer or 'none', got '0'",
     });
     expect(parseRoundLimit("ten")).toHaveProperty("problem");
+  });
+
+  // Catches the default drifting from the documented 5 rounds, or becoming unlimited.
+  test("the default limit is 5 rounds and is described as such", () => {
+    expect(DEFAULT_ROUND_LIMIT).toEqual({ kind: "limited", rounds: 5 });
+    expect(describeRoundLimit(DEFAULT_ROUND_LIMIT)).toBe("at most 5 fix rounds");
   });
 
   test("words the limit for the preamble", () => {

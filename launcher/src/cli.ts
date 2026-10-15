@@ -43,7 +43,13 @@ import {
   showBanner,
   showNote,
 } from "./prompts.ts";
-import { describeRoundLimit, parseQueueValues, parseRoundLimit, type RoundLimit } from "./queue.ts";
+import {
+  DEFAULT_ROUND_LIMIT,
+  describeRoundLimit,
+  parseQueueValues,
+  parseRoundLimit,
+  type RoundLimit,
+} from "./queue.ts";
 import { runPlan, runQueue } from "./run.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
@@ -118,13 +124,13 @@ function formatUsage(): string {
     "  --effort <flavor>  one of the team's flavors in team.yaml (default: the team's defaults)",
     "  --queue <n,n,...>  run the entry point once per value, unattended (entry points with a queue)",
     "  --queue-label <l>  the same, over every open issue with this label (needs gh access to the repo)",
-    "  --max-rounds <n>   fix rounds per queue item, or 'none' for no limit (asked for when missing)",
+    "  --max-rounds <n>   fix rounds per queue item, or 'none' for no limit (default 5)",
     "  --print            print the command instead of running it",
     "  --help, -h         this help",
     "",
     "Examples:",
     "  j5 issue-team work-issue --issue 123 --effort low",
-    "  j5 issue-team pr-followup --pr 456 --project ~/code/app -- --safety balanced",
+    "  j5 pr-reviewer review --pr 456 --project ~/code/app -- --safety balanced",
     "  j5 issue-team work-issue --queue 474,480 --max-rounds 5",
   ].join("\n");
 }
@@ -427,25 +433,15 @@ async function chooseQueue(
     return undefined;
   }
 
-  let roundLimitText = requestedRoundLimit;
-  if (roundLimitText === undefined) {
-    if (!interaction.canPrompt) {
-      throw new UsageError("missing --max-rounds <n|none> (fix rounds per queue item)");
+  let roundLimit = DEFAULT_ROUND_LIMIT;
+  if (requestedRoundLimit !== undefined) {
+    const parsedRoundLimit = parseRoundLimit(requestedRoundLimit);
+    if ("problem" in parsedRoundLimit) {
+      throw new UsageError(parsedRoundLimit.problem);
     }
-    interaction.askedAnything = true;
-    roundLimitText = await askForText(
-      `${PARAMETER_PROMPT_PREFIX} fix rounds per item (a number; empty for no limit)`,
-      (value) => {
-        const parsed = parseRoundLimit(value);
-        return "problem" in parsed ? parsed.problem : undefined;
-      },
-    );
+    roundLimit = parsedRoundLimit.limit;
   }
-  const parsedRoundLimit = parseRoundLimit(roundLimitText);
-  if ("problem" in parsedRoundLimit) {
-    throw new UsageError(parsedRoundLimit.problem);
-  }
-  return { parameterName: queue.parameter, source, roundLimit: parsedRoundLimit.limit };
+  return { parameterName: queue.parameter, source, roundLimit };
 }
 
 /** Looks up what exists where the entry point's worktree goes, for buildLaunchPlan. */

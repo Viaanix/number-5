@@ -1,15 +1,14 @@
 // Tests for the issue-team helpers (workflows/issue-team/helpers, launched by its bin/).
-// Git helpers run against real temporary repositories; pr-threads runs against a
-// fake gh. The last block calls the helpers by bare name through the same shells
-// docker-agent's script tools use on each OS, with arguments in the environment.
+// Git helpers run against real temporary repositories. The last block calls the helpers
+// by bare name through the same shells docker-agent's script tools use on each OS, with
+// arguments in the environment.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import {
   createFixtureProject,
-  createTemporaryDirectory,
   DOCKER_AGENT_SHELLS,
   FIXTURE_DEFAULT_BRANCH,
   type HelperResult,
@@ -17,15 +16,12 @@ import {
   runGit,
   runHelperScriptFile,
   runThroughDockerAgentShell,
-  writeFakeCommand,
 } from "#launcher-test/fixtures.ts";
-import { findPathVariableName, readPathValue } from "#launcher/environment.ts";
 
 afterAll(removeTemporaryDirectories);
 
 const TEAM_DIRECTORY = resolve(import.meta.dir, "..");
 const TEAM_BIN_DIRECTORY = join(TEAM_DIRECTORY, "bin");
-const USAGE_EXIT_CODE = 2;
 
 function runHelperScript(
   helperName: string,
@@ -57,17 +53,6 @@ function createFeatureBranchProject(): { projectRoot: string; firstCommit: strin
   writeFileSync(join(projectRoot, "untracked.txt"), "new\n");
   return { projectRoot, firstCommit };
 }
-
-describe("issue-team-base-ref", () => {
-  test("prints origin/HEAD's target as a remote-tracking ref", () => {
-    const { projectRoot } = createFixtureProject("base-ref-app");
-    expect(runHelperScript("base-ref", [], projectRoot)).toEqual({
-      exitCode: 0,
-      standardOutput: `origin/${FIXTURE_DEFAULT_BRANCH}\n`,
-      standardError: "",
-    });
-  });
-});
 
 describe("issue-team-change-diff", () => {
   let project: { projectRoot: string; firstCommit: string };
@@ -145,153 +130,6 @@ describe("issue-team-test-prescreen", () => {
   });
 });
 
-describe("issue-team-pr-threads", () => {
-  // One resolved and two unresolved threads, in GitHub's field order.
-  const GRAPHQL_RESPONSE = {
-    data: {
-      repository: {
-        pullRequest: {
-          reviewThreads: {
-            nodes: [
-              {
-                id: "T_resolved",
-                isResolved: true,
-                isOutdated: false,
-                path: "a.ts",
-                line: 1,
-                comments: { nodes: [] },
-              },
-              {
-                id: "T_open",
-                isResolved: false,
-                isOutdated: false,
-                path: "b.ts",
-                line: 7,
-                comments: {
-                  nodes: [
-                    {
-                      databaseId: 11,
-                      author: { login: "reviewer" },
-                      body: "rename this",
-                      url: "https://example.invalid/11",
-                    },
-                  ],
-                },
-              },
-              {
-                id: "T_outdated",
-                isResolved: false,
-                isOutdated: true,
-                path: "c.ts",
-                line: null,
-                comments: { nodes: [] },
-              },
-            ],
-          },
-        },
-      },
-    },
-  };
-
-  let fakeGhEnvironment: Record<string, string>;
-  let logPath: string;
-  beforeAll(() => {
-    const fakeDirectory = createTemporaryDirectory();
-    writeFakeCommand(fakeDirectory, "gh", join(import.meta.dir, "fixtures", "fake-gh.ts"));
-    const responsePath = join(fakeDirectory, "response.json");
-    writeFileSync(responsePath, JSON.stringify(GRAPHQL_RESPONSE));
-    logPath = join(fakeDirectory, "gh-calls.jsonl");
-    // Under the existing spelling (Path on Windows) so it replaces PATH, not duplicates it.
-    const pathVariable = findPathVariableName(process.env);
-    fakeGhEnvironment = {
-      [pathVariable]: `${fakeDirectory}${delimiter}${readPathValue(process.env)}`,
-      FAKE_GH_LOG: logPath,
-      FAKE_GH_GRAPHQL_RESPONSE: responsePath,
-    };
-  });
-
-  test("prints each unresolved thread as one JSON line, without isResolved, in GitHub's field order", () => {
-    const result = runHelperScript(
-      "pr-threads",
-      ["456"],
-      createTemporaryDirectory(),
-      fakeGhEnvironment,
-    );
-    expect({ exitCode: result.exitCode, standardError: result.standardError }).toEqual({
-      exitCode: 0,
-      standardError: "",
-    });
-    expect(result.standardOutput).toBe(
-      `${JSON.stringify({ id: "T_open", isOutdated: false, path: "b.ts", line: 7, comments: { nodes: [{ databaseId: 11, author: { login: "reviewer" }, body: "rename this", url: "https://example.invalid/11" }] } })}\n` +
-        `${JSON.stringify({ id: "T_outdated", isOutdated: true, path: "c.ts", line: null, comments: { nodes: [] } })}\n`,
-    );
-  });
-
-  test("asks GitHub for this repository's PR, with the number from the environment", () => {
-    const result = runHelperScript("pr-threads", [], createTemporaryDirectory(), {
-      ...fakeGhEnvironment,
-      pr: "789",
-    });
-    expect({ exitCode: result.exitCode, standardError: result.standardError }).toEqual({
-      exitCode: 0,
-      standardError: "",
-    });
-    const lastCall: unknown = JSON.parse(
-      readFileSync(logPath, "utf8").trim().split("\n").at(-1) ?? "[]",
-    );
-    expect(lastCall).toEqual(
-      expect.arrayContaining(["api", "graphql", "owner=acme", "name=widgets", "pr=789"]),
-    );
-  });
-
-  test.each([
-    [["abc"], "not a PR number: abc"],
-    [[], "usage: issue-team-pr-threads <pr-number> (or pr in the environment)"],
-  ])("exits 2 for arguments %p", (helperArguments, expectedMessage) => {
-    const result = runHelperScript(
-      "pr-threads",
-      helperArguments,
-      createTemporaryDirectory(),
-      fakeGhEnvironment,
-    );
-    expect(result.exitCode).toBe(USAGE_EXIT_CODE);
-    expect(result.standardError).toBe(`issue-team-pr-threads: ${expectedMessage}\n`);
-  });
-});
-
-describe("issue-team-role", () => {
-  const testerPrompt = readFileSync(join(TEAM_DIRECTORY, "roles", "tester.md"), "utf8");
-
-  // Catches a helper that prints a different file, or adds to it: the entry agents
-  // paste this output verbatim as the start of a sub-agent's task.
-  test("prints the role's prompt file exactly", () => {
-    expect(runHelperScript("role", ["tester"], createTemporaryDirectory())).toEqual({
-      exitCode: 0,
-      standardOutput: testerPrompt,
-      standardError: "",
-    });
-  });
-
-  test("reads the role from the environment when no argument is given", () => {
-    const result = runHelperScript("role", [], createTemporaryDirectory(), { role: "tester" });
-    expect(result.standardOutput).toBe(testerPrompt);
-  });
-
-  // Catches a name that reaches outside roles/ (a path join without the allow-list)
-  // and a missing name that prints nothing and still exits 0.
-  test.each([
-    [["../team"], "a path outside roles/"],
-    [["builder"], "a role without a prompt file"],
-    [[], "no role at all"],
-  ])("refuses %p (%s) with the list of roles", (helperArguments) => {
-    expect(runHelperScript("role", helperArguments, createTemporaryDirectory())).toEqual({
-      exitCode: USAGE_EXIT_CODE,
-      standardOutput: "",
-      standardError: "issue-team-role: usage: issue-team-role <reviewer|tester>\n",
-    });
-  });
-});
-
 describe.each(DOCKER_AGENT_SHELLS)(
   "helpers by bare name through $shellName",
   ({ commandPrefix }) => {
@@ -309,27 +147,12 @@ describe.each(DOCKER_AGENT_SHELLS)(
       );
     }
 
-    test("issue-team-base-ref", () => {
-      const { projectRoot } = createFixtureProject("bare-base-ref-app");
-      expect(runThroughShell("issue-team-base-ref", projectRoot)).toEqual({
-        exitCode: 0,
-        standardOutput: `origin/${FIXTURE_DEFAULT_BRANCH}\n`,
-        standardError: "",
-      });
-    });
-
     test("issue-team-test-prescreen", () => {
       const { projectRoot } = createFeatureBranchProject();
       addFocusedTestFile(projectRoot);
       const result = runThroughShell("issue-team-test-prescreen", projectRoot);
       expect(result.exitCode).toBe(STRICT_FAILURE_EXIT_CODE);
       expect(result.standardOutput).toContain("[HIGH] disabled-tests  focused.test.ts:1\n");
-    });
-
-    test("issue-team-role", () => {
-      const result = runThroughShell("issue-team-role reviewer", createTemporaryDirectory());
-      expect(result.exitCode).toBe(0);
-      expect(result.standardOutput).toStartWith("You are an independent reviewer.");
     });
 
     test("issue-team-change-diff with since in the environment", () => {

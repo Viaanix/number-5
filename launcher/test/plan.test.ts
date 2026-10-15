@@ -39,6 +39,13 @@ const SAMPLE_MANIFEST: WorkflowManifest = {
       worktree: { mode: "pr", pull_request_parameter: "pr" },
       message: "Follow up on PR #{pr} in {repo}",
     },
+    "pr-review": {
+      description: "d",
+      agent: "reviewer",
+      parameters: { pr: { type: "integer", label: "PR" } },
+      worktree: { mode: "pr", pull_request_parameter: "pr", detached: true },
+      message: "Review PR #{pr} in {repo}",
+    },
     chat: {
       description: "d",
       agent: "root",
@@ -258,6 +265,18 @@ describe("buildLaunchPlan — pull request worktree", () => {
     expect(() => buildLaunchPlan(buildRequest(pullRequestRequest))).toThrow(
       "entry point 'pr-followup' needs the PR's branch to create its worktree",
     );
+  });
+
+  // Catches a detached review and an attached follow-up of the same PR sharing one
+  // path: whichever ran second would clobber (or wrongly reuse) the other's worktree.
+  test("gives a detached review and an attached follow-up of the same PR different worktrees", () => {
+    const worktree = { state: { kind: "absent" as const }, pullRequestBranch };
+    const attached = buildLaunchPlan(buildRequest({ ...pullRequestRequest, worktree }));
+    const detached = buildLaunchPlan(
+      buildRequest({ entryPointName: "pr-review", parameterValues: { pr: "456" }, worktree }),
+    );
+    expect(attached.workingDirectory).toBe(PULL_REQUEST_WORKTREE_PATH);
+    expect(detached.workingDirectory).toBe(`${PULL_REQUEST_WORKTREE_PATH}-detached`);
   });
 });
 

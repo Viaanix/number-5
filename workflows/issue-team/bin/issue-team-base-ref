@@ -1,4 +1,0 @@
-#!/bin/sh
-# issue-team-base-ref for Linux and macOS: runs helpers/base-ref.ts with Bun. The Windows
-# launcher is issue-team-base-ref.cmd; docker-agent's script tools call either by bare name.
-exec bun "$(dirname "$0")/../helpers/base-ref.ts" "$@"

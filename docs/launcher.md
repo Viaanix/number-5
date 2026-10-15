@@ -31,8 +31,8 @@ j5 list                                    # teams, entry points, parameters, ef
 j5 issue-team work-issue --issue 123       # from inside the project checkout
 j5 issue-team work-issue --issue 123 --project ~/code/app --effort low
 j5 issue-team work-issue --issue 123 --base origin/release-2
-j5 issue-team pr-followup --pr 456 -- --safety balanced   # after --: raw docker agent run flags
-j5 issue-team closeout --pr 456 --print    # show the exact command, run nothing
+j5 pr-reviewer review --pr 456 -- --safety balanced   # after --: raw docker agent run flags
+j5 issue-team work-issue --issue 123 --print    # show the exact command, run nothing
 ```
 
 | Option | Meaning | Default |
@@ -43,7 +43,7 @@ j5 issue-team closeout --pr 456 --print    # show the exact command, run nothing
 | `--<parameter> <value>` | The entry point's parameters, e.g. `--issue 123` | Asked for, or an error when not in a terminal |
 | `--queue <n,n,…>` | Run the entry point once per value, unattended ([queue runs](#queue-runs)). Only entry points with a `queue:` block | |
 | `--queue-label <label>` | The same, over every open issue with this label, oldest first. Needs a `gh` login (or `GH_TOKEN`) that can see the repository | |
-| `--max-rounds <n\|none>` | Fix rounds per queue item; `none` for no limit | Asked for, or an error when not in a terminal |
+| `--max-rounds <n\|none>` | Fix rounds per queue item; `none` for no limit | 5 |
 | `--print` | Print the command as one line instead of running it: bash/zsh syntax on Linux and macOS, PowerShell on Windows. A queue prints one line per item | |
 | `-- …` | Everything after a bare `--` is appended to `docker agent run` | |
 
@@ -65,12 +65,12 @@ git -C ~/code/my-app fetch origin main && git -C ~/code/my-app worktree add -b w
 
 `j5 issue-team work-issue --queue 474,480,482 --max-rounds 5` (or `--queue-label ready`) runs the entry point once per issue, one after another, **unattended**:
 
-- Each item gets its own worktree, exactly as a single run would, and runs `docker agent run … --exec`: no TUI, nobody to answer. The entry point's `queue.preamble` goes before its prompt and says so (issue-team's tells the agent to decide where it would have asked, and to explain each decision in the PR, replaces its fix-round limit with `--max-rounds`, and asks for a last line `RESULT: PR <url>` or `RESULT: FAILED <reason>`).
+- Each item gets its own worktree, exactly as a single run would, and runs `docker agent run … --exec`: no TUI, nobody to answer. The entry point's `queue.preamble` goes before its prompt and says so (issue-team's tells the agent to decide where it would have asked, and to explain each decision in the PR, replaces its fix-round limit with `--max-rounds` (5 when not given), says that on hitting the limit or a round with no progress it publishes a **draft** PR and ends with `RESULT: FAILED draft PR <url>: <reason>`, and otherwise asks for a last line `RESULT: PR <url>` or `RESULT: FAILED <reason>`).
 - Each item's output is shown live and saved to `<project>/.j5/queue/<start time>/issue-<n>.log`; `summary.md` in the same directory lists every item's outcome.
 - **The outcome comes from the `RESULT:` line**, never the exit code: `docker agent run --exec` exits 0 whenever the agent finishes its turn. No `RESULT:` line means the item failed.
-- An item that fails (including a failed git step, e.g. its branch already exists) is reported and the queue goes on. An item whose agent could not run at all (docker-agent printed `harness … failed`, e.g. the Claude session limit) **stops the queue**, since every later item would fail the same way. Ctrl-C stops it after the current item.
-- `j5` exits 0 only when every item opened a pull request, 1 otherwise.
-- In a terminal, an entry point with a queue that gets neither `--<parameter>` nor `--queue` / `--queue-label` asks whether to run one item, a list, or a label; a queue run without `--max-rounds` asks for the limit (empty for none). `--print` runs nothing and creates no log directory; `--queue-label` still asks GitHub for the issues.
+- An item that fails (including a failed git step, e.g. its branch already exists) is reported and the queue goes on. An item whose agent could not run at all (docker-agent printed `harness … failed` or `model failed:`, e.g. the Claude session limit) **stops the queue**, since every later item would fail the same way. Ctrl-C stops it after the current item.
+- `j5` exits 0 only when every item opened a pull request, 1 otherwise. A draft PR therefore counts as a failed item in the exit code and the summary.
+- In a terminal, an entry point with a queue that gets neither `--<parameter>` nor `--queue` / `--queue-label` asks whether to run one item, a list, or a label. `--print` runs nothing and creates no log directory; `--queue-label` still asks GitHub for the issues.
 
 ## The manifest: `workflows/<team>/workflow.yaml`
 
@@ -96,7 +96,7 @@ entrypoints:
 
 **Templates.** `message` and `worktree.name` take `{placeholder}`s: any parameter, plus `{repo}` (the project's directory name). An unknown placeholder is a manifest error, never literal text in a prompt. `{{` and `}}` are literal braces, e.g. `gh api repos/{{owner}}/{{repo}}/pulls/{pr}` sends `repos/{owner}/{repo}/pulls/7`.
 
-**Harness versus native prompts.** For issue-team and test-quality, the message is the whole prompt because Docker Agent gives a Claude Code harness agent nothing else; use a YAML block (`message: |`). Native agents such as pr-reviewer load a durable `instruction_file` from `team.yaml` and use the manifest message for task parameters. `--print` shows the manifest message, not native instruction-file contents.
+**Harness versus native prompts.** For test-quality, a Claude Code harness team, the message is the whole prompt because Docker Agent gives a harness agent nothing else; use a YAML block (`message: |`). Native agents such as issue-team and pr-reviewer load a durable `instruction_file` from `team.yaml` and use the manifest message for task parameters. `--print` shows the manifest message, not native instruction-file contents.
 
 **Worktree modes.**
 

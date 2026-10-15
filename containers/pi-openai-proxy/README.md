@@ -13,7 +13,7 @@ credential handling. This does not change the existing Claude Code harness workf
 - Every resolved dependency is recorded in `bun.lock`; builds use a frozen lockfile
   and do not run dependency lifecycle scripts. Pi's model adapter resolves to 0.73.1.
 
-The build context permits only `package.json` and `bun.lock`. Credentials and the
+The build context permits only `package.json`, `bun.lock` and `patch-usage.ts`. Credentials and the
 host's Pi configuration/extensions are not copied into the image or bind-mounted.
 Compose mounts this repository's `models.json` read-only, separately from the
 named login volume.
@@ -34,6 +34,30 @@ instead; pr-reviewer sets `high` for Sonnet and `medium` for its Haiku flavor.
 Without explicit effort, the adapter sends `thinking: disabled`, which Sonnet 5.5
 rejects. See the live receipt below.
 
+## Get the image
+
+CI publishes the image to GitHub Packages as `ghcr.io/viaanix/j5-pi-openai-proxy:<tag>`
+(`linux/amd64` and `linux/arm64`); the tag is the one in `compose.yaml`. The package is
+private to the Viaanix organisation, so pulling it needs a login, once per machine:
+
+1. Create a **classic** personal access token with only the `read:packages` scope and
+   authorise it for Viaanix SSO if the organisation requires that.
+2. `echo "$TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin`
+
+The pull itself is the first command in the next section (every compose command needs the
+bearer token exported first, even `pull`).
+
+Skipping the login is safe: when the pull is denied, `docker compose up` builds the same
+Dockerfile and lockfile locally instead (checked: the denied pull was followed by a build and
+exit 0). The only cost is a slower first start. The image contains no credentials, so nothing
+private ships in it. Your Claude login is created inside *your* `pi-auth` volume in the next
+section; **every person logs in with their own account, never a shared one**, and the volume
+must never be copied between machines.
+
+The image refuses to start without `PI_PROXY_AUTH_TOKEN` (exit 64). Without that guard the
+proxy starts with no authentication at all and serves whatever login is in the volume, so
+`docker run -p 4141:4141 <image>` would have exposed it to the network.
+
 ## Build and log in
 
 From the repository root:
@@ -41,7 +65,7 @@ From the repository root:
 ```bash
 cd containers/pi-openai-proxy
 export PI_PROXY_AUTH_TOKEN="$(openssl rand -hex 32)"
-docker compose build
+docker compose pull   # or `docker compose build`, which needs no registry login
 
 docker compose run --rm --no-deps --entrypoint bun proxy \
   /app/node_modules/@mariozechner/pi-coding-agent/dist/cli.js \
@@ -149,6 +173,76 @@ The upstream adapter has a restricted tool-schema subset, omits Anthropic
 `response_format`, and does not forward thinking events into its SSE output.
 A model listing alone does not establish compatibility with a team's tools.
 
+## Local patch: token usage
+
+The pinned proxy reports Pi's `input` as `prompt_tokens`, which for Anthropic is only the
+uncached input. With prompt caching, a ~9,650-token prompt came back as `prompt_tokens: 4`,
+`completion_tokens: 4`, `total_tokens: 9650`, so Docker Agent's token display, context size
+and compaction trigger saw about 0.04% of the real context and its counters never accumulated
+([gotcha](../../docs/docker-agent/gotchas.md#token-counters-through-the-proxy-ignore-cached-input-so-compaction-cannot-trigger)).
+
+`patch-usage.ts` runs at build time and replaces `mapUsage()` so `prompt_tokens` includes cache
+reads and writes, with `prompt_tokens_details.cached_tokens` and `cache_write_tokens` for Docker
+Agent to subtract. It must match exactly one function: if the pinned package changes, the build
+fails instead of shipping an unpatched proxy.
+
+Checked offline in a throwaway container (no network, no login): the patched file differs from
+the original only in that function, 4 + 9000 + 642 input tokens give `prompt_tokens` 9646 with
+`completion_tokens` 4 and `total_tokens` 9650, and running the patch step a second time exits 1.
+
+Checked end to end on 2026-10-15, after `docker compose build` and a recreate: a streamed request
+with a ~9,650-token prompt returned `prompt_tokens` 9646, `completion_tokens` 4, `total_tokens` 9650
+(it was `prompt_tokens` 4 before the patch), with `cache_write_tokens` 9642 on the first call and
+`cached_tokens` 9642 on repeats; the non-streamed response agreed. Not yet watched: a real run's
+token counter accumulating in the Docker Agent sidebar.
+
+## Upstream status and the fork
+
+Treat `@victor-software-house/pi-openai-proxy` as abandoned: 4.9.5 is the latest release (published 2026-05-06), the repository's last push was 2026-06-08, and there is no open issue about what we patch. We keep it pinned and carry small build-time patches (`patch-usage.ts`), each of which fails the build if the package stops matching.
+
+A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy), unchanged from upstream so far. **Revisit and switch to it once we need more than a few fixes**, or one that does not fit a build-time patch. A fork does not change the Opus 5.5 rejection, which comes from Pi's client identity and not from this proxy.
+
+## Share it with the team (maintainers)
+
+**Publishing.** `.github/workflows/proxy-image.yml` runs when a build input changes
+(`Dockerfile`, `.dockerignore`, `package.json`, `bun.lock`, `patch-usage.ts`) or `compose.yaml`.
+On a pull request it builds and smoke-tests only. On a push to `main` it also publishes the tag
+named in `compose.yaml`. The smoke test checks that the usage patch is in the shipped file, that
+the image exits 64 without a token, that it answers 401 to a missing or wrong bearer and 200 to the
+right one, and that it runs as UID 1000.
+
+**Bump the tag when a build input changes.** The last number in the `compose.yaml` image tag
+(`4.9.5-1`) is the revision. CI records a hash of the build inputs in an image label. If the
+tag is already published from the same inputs it skips quietly, for example after a `compose.yaml`
+edit that is not a bump. If the inputs differ it fails and tells you to bump, because a machine
+that already pulled the old image under that tag would otherwise keep running it with no warning.
+
+**First publish: check who can read it.** GitHub Packages links the package to this repository
+and, by default, gives it the repository's access permissions. This repository is public, and I
+have not verified what that means for a private package. After the first publish, open
+*Package settings* on the new package and make sure:
+
+- visibility is **Private**, and "Inherit access from repository" is off or you have confirmed
+  it keeps the package private;
+- the Viaanix team that should use it has the **Read** role;
+- an anonymous pull fails. This returns 401 (or 404) if it is private and 200 if it is public:
+
+  ```bash
+  token=$(curl -s "https://ghcr.io/token?scope=repository:viaanix/j5-pi-openai-proxy:pull" | jq -r .token)
+  curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $token" \
+    -H "Accept: application/vnd.oci.image.index.v1+json" \
+    https://ghcr.io/v2/viaanix/j5-pi-openai-proxy/manifests/<tag>
+  ```
+
+As far as I found, GitHub has no REST endpoint for changing a package's visibility or access,
+so those are settings-page steps. I also have not confirmed that fine-grained tokens cannot pull
+from `ghcr.io`; the instructions above say "classic" because that is what the documentation
+describes for the Container registry.
+
+**Never publish a login.** The image is built from `package.json`, `bun.lock` and
+`patch-usage.ts` only (`.dockerignore` excludes everything else). Do not add `COPY` lines for
+anything under `~/.pi`.
+
 ## Verification receipt
 
 2026-10-15, linux/amd64, Docker Engine 29.8.2, Docker Agent 1.145.0:
@@ -163,6 +257,12 @@ A model listing alone does not establish compatibility with a team's tools.
   offered subscription authentication and Anthropic (Claude Pro/Max).
 - Docker Agent's `models --provider pi`, configured against the container, exited
   0 and reported no models for the empty credential volume.
+- Image entrypoint (2026-10-15): with no `PI_PROXY_AUTH_TOKEN`, and with an empty one, the
+  container exits 64 with a message; before the guard the same image answered `/v1/models` with
+  HTTP 200 and no token. With a token: no bearer → 401, wrong bearer → 401, right bearer → 200;
+  extra arguments reach the proxy; `bun` is PID 1 and `docker stop` exits 0.
+- Registry fallback (2026-10-15, Docker Compose on this host): with `image:` and `build:` both set,
+  a pull denied by the registry was followed by a local build and exit 0.
 
 These initial checks used an isolated Compose project with no provider credentials.
 

@@ -162,8 +162,8 @@ replace the maintainers' review.
 The entry uses `pr` mode with `detached: true`, creating
 `<project>-pr-<number>-detached` beside the source checkout. New review worktrees
 are detached at the freshly fetched PR head, so a PR branch already checked out
-elsewhere is not claimed, moved or reset. Editable PR follow-up workflows keep
-their separate `<project>-pr-<number>` paths and branch-tracking behavior.
+elsewhere is not claimed, moved or reset. An editable (attached) PR worktree, if a
+team defines one, keeps its separate `<project>-pr-<number>` path and branch tracking.
 
 A reused review worktree is not refreshed automatically. If it is stale or
 dirty, the context helper blocks rather than silently reviewing the wrong

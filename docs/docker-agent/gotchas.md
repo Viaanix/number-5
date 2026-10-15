@@ -123,6 +123,16 @@ compatibility. Keep model-specific request settings explicit and verify the tool
 loop, not only model discovery. This receipt does not establish signed-history
 portability or thinking visibility through an OpenAI translator.
 
+### Token counters through the proxy ignore cached input, so compaction cannot trigger
+
+**Observed:** v1.145.0, pi-openai-proxy 4.9.5, Haiku 5.5, 2026-10-15, while watching a real issue-team run whose sidebar showed 768 then 354 tokens and `$0.00`.
+
+**Receipt:** a streamed `/v1/chat/completions` request with a ~9,600-token system prompt returned `usage: {prompt_tokens: 4, completion_tokens: 4, total_tokens: 9650}`; the same through a non-streamed request and a repeat of the prompt. `session.db` agreed: a whole root session recorded `input_tokens = 2`, no `usage_json` on any item. In the proxy, `mapUsage()` (`dist/index.mjs:555`) sets `prompt_tokens: usage.input`, and Pi's `input` excludes `cacheRead` and `cacheWrite`.
+
+**Why it matters:** Docker Agent builds its context size from the reported prompt and completion tokens (`SessionUsage`, `ContextLength: input + output`) and its proactive compaction decision from the same counters (`compaction.ShouldCompact(inputTokens, outputTokens, …, contextLimit, threshold)`). Reading the source at the installed commit, not testing it, this means the 90% trigger can never fire; only the after-the-fact overflow recovery remains, and that has not been exercised through the proxy. Cost shows `$0.00` for a separate reason (no price for `pi/…` models) and is not fixed by this.
+
+**Fix:** `containers/pi-openai-proxy/patch-usage.ts` rewrites `mapUsage()` at build time so `prompt_tokens` is the whole prompt (`input + cacheRead + cacheWrite`) with `prompt_tokens_details.cached_tokens` and `cache_write_tokens`, which Docker Agent's Chat Completions adapter (`oaistream/adapter.go`) subtracts to recover the fresh part. Verified offline (the diff is that one function; 4 + 9000 + 642 in gives `prompt_tokens` 9646, so 9646 + 4 = 9650 = `total_tokens`; a second run of the patch step exits 1) and **end to end**, 2026-10-15, after rebuilding and recreating the proxy: the same ~9,650-token streamed request that returned `prompt_tokens: 4` now returns `prompt_tokens: 9646, completion_tokens: 4, total_tokens: 9650`, with `cache_write_tokens: 9642` on the first call and `cached_tokens: 9642` on repeats; the non-streamed response agrees. **Not yet watched:** a real run's counters accumulating in the sidebar, and compaction firing.
+
 ### A script tool result over 51,200 bytes is cut to its tail
 
 **Observed:** Docker Agent v1.145.0, Linux, 2026-10-15, real run of
@@ -145,6 +155,110 @@ every page under the limit and a fingerprint tying the pages together. Put the
 identifying facts in a small result, not at the start of a big one. A test with a
 small fixture will not catch this. Also: `git diff --unified=N --stat` prints the
 patch after the stat, so a stat command must not carry patch-implying options.
+
+### `npm ci` through a symlinked `node_modules` empties the directory it points to
+
+**Observed:** npm on this host, 2026-10-15, on a scratch project (not a real checkout).
+
+**Receipt:** `node_modules` was a symlink to a sibling directory holding a marker file. After `npm ci`: `node_modules` was a real directory with the package installed, the marker file was gone, and the sibling directory was **empty**. The install followed the link, deleted the target's contents, and then replaced the link.
+
+**Why it matters:** issue-team's first #558 run had the builder symlink the worktree's `node_modules` to the main checkout's, and a rerun was started in that worktree. The new "install dependencies" step would have emptied the main checkout's `node_modules`. It did not happen: the rerun read the issue, saw the PR already existed and stopped before any install (4 shell calls; the main checkout still had 359 entries, last modified before the run).
+
+**Consequence:** never link a dependency directory between checkouts, and remove an existing link with `rm node_modules` (not `rm -r`, no trailing slash) before installing. The root's instructions say both. This is a prompt-level guard; a `tool_guard` hook that refuses `npm ci` while `node_modules` is a symlink would enforce it.
+
+### `shell` kills a call after 30 seconds unless `timeout` is passed
+
+**Observed:** Docker Agent v1.145.0, Linux, Sonnet 5.5 through the proxy, 2026-10-15.
+
+**Receipt:** a native builder agent ran `sleep 32 && echo slept` twice:
+
+```text
+shell {"cmd": "sleep 32 && echo slept once", "timeout": null} -> Command timed out after 30s
+shell {"cmd": "sleep 32 && echo slept once", "timeout": 60}   -> slept once
+```
+
+**Consequence:** an installs, build or test-suite command needs an explicit `timeout`,
+so the issue-team instructions say to pass one. Each call also starts a fresh shell:
+`cd` and variables do not carry over.
+
+### Filesystem tools accept `~/…` paths, and `allow_list` expands `~`
+
+**Observed:** v1.145.0, Haiku 5.5, 2026-10-15, `allow_list: [".",
+"~/.agents/skills/j5-test-quality"]`.
+
+**Receipt:**
+
+```text
+read_file ~/.agents/skills/j5-test-quality/workflows/generate.md -> read (first heading returned)
+list_directory ~/.agents/skills/j5-test-quality/workflows        -> four workflow files
+read_file ~/.agents/skills/the-craft/SKILL.md                    -> outside the allowed directories (., ~/.agents/skills/j5-test-quality)
+```
+
+`add_environment_info` named the working directory, OS and shell, not the home directory.
+
+**Consequence:** an agent can be pointed at one directory under the home folder without
+a shell to find `$HOME`, and cannot read its siblings.
+
+### An unrestricted `search_files_content` from `/` can outlast the run
+
+**Observed:** v1.145.0, 2026-10-15, a native tester with an unrestricted filesystem toolset.
+
+**Receipt:** it called `search_files_content {"path": "/", …}` 5 seconds into its task and
+had not returned when the run was killed at 700 seconds (`The tool call was canceled`).
+
+**Consequence:** give every agent that can search an `allow_list`. A wrong skill path
+then fails fast instead of becoming a filesystem scan.
+
+### `--exec` rejects a tool that is not pre-approved
+
+**Observed:** v1.145.0, 2026-10-15, pr-reviewer's `pr_comment`, which is not in `permissions.allow`.
+
+**Receipt:** `j5 pr-reviewer review --pr 12 -- --exec --json` emitted a
+`tool_call_confirmation` and the tool response was `The user rejected the tool call.`;
+with `--safety autonomous` the same call posted. A run whose every tool is in
+`permissions.allow` emitted no `tool_call_confirmation` events.
+
+**Consequence:** list every tool an unattended run needs in `permissions.allow`. `deny`
+still wins over `allow`.
+
+### Opus 5.5 is rejected for the Pi proxy's subscription login
+
+**Observed:** v1.145.0, proxy with pi-openai-proxy 4.9.5 and Pi 0.73.0, 2026-10-15.
+
+**Receipt:** a native agent on `pi/claude-opus-5-5` failed on its first call:
+
+```text
+400 invalid_request_error: Claude Code 2.1.75 does not support this model;
+version 2.1.280 or newer is required (error_code: claude_code_version_too_old)
+```
+
+`claude-sonnet-5-5` and `claude-haiku-5-5` through the same login work.
+
+**Consequence:** the proxy's `models.json` does not list Opus 5.5, and issue-team's
+reviewer runs on Sonnet 5.5 where it used to run on Opus. Not tried: a newer Pi release.
+
+### `permissions.deny` globs block the spellings they name, and not a branch called `fix-foo`
+
+**Observed:** v1.145.0, Haiku 5.5 through the proxy, 2026-10-15, with issue-team's real
+`permissions` block and a `shell` toolset in a scratch repository with no remote.
+
+**Receipt:** twelve commands, one `shell` call each, `--exec --json`:
+
+```text
+refused (Tool 'shell' is denied by permissions configuration.):
+  git push --force origin main · git push -f origin main · git push origin +main
+  git reset --hard HEAD · git commit … (the hook-bypass flag) · gh pr ready 1
+  gh pr merge 1 · gh issue close 1 · sudo -n true
+ran:
+  git push -u origin fix-foo   (failed on its own: no such branch; not denied)
+  echo hello · git log --oneline
+```
+
+No `tool_call_confirmation` events. The denied calls never reached the shell.
+
+**Consequence:** `*git push* -f*` needs the space before `-f`; without it `fix-foo` would
+match. Patterns match the command text, so they are defense in depth: a spelling the
+globs do not name is not blocked.
 
 ### Read-only native filesystem tools can enforce a checkout boundary
 
@@ -259,11 +373,15 @@ The TUI header shows the worktree path either way. Seen in a real `work-issue` r
 
 **Observed:** v1.145.0, 2026-10-14.
 
-**Receipt:** `docker agent debug toolsets` for an agent with `skills: [j5-test-quality]` (installed in `~/.agents/skills`) lists only `read_skill`. In the source, `read_skill_file` is offered only when a skill has supporting files listed (`pkg/tools/builtin/skills/skills.go`), which local skills never do.
+**Receipt:** `docker agent debug toolsets` for an agent with `skills: true`, `[j5-test-quality]`, `[local, j5-test-quality]` or `[local]` (the skill installed in `~/.agents/skills`) lists only `read_skill` in every case. In a real run (2026-10-15, Sonnet 5.5 through the proxy) the agent got the 6 KB `SKILL.md` from `read_skill {"name": "j5-test-quality"}`, then `read_skill {"name": "j5-test-quality/workflows/generate.md"}` returned `skill "…" not found` and it was never offered another tool. The source at the installed commit (`docker agent version` → 502549c) explains it: `read_skill_file` is registered only when some loaded skill has more than one entry in `Skill.Files` (`pkg/tools/builtin/skills/skills.go`, `hasFiles()`), and `Files` is assigned only for remote-index skills (`pkg/skills/remote.go`); `pkg/skills/local.go` sets `FilePath` and `BaseDir` and never `Files`. The docs page tracks `main` and describes `read_skill_file` for `SKILL.md` directories without this limit.
 
-**Consequence:** instructions must point at a local skill's other files by path. The filesystem tools expand a leading `~/` on every OS (`pkg/tools/builtin/filesystem/filesystem_paths.go`), so `read_file ~/.agents/skills/<name>/workflows/x.md` works on Windows too.
+**Consequence:** instructions must point at a local skill's other files by path. The filesystem tools expand a leading `~/` on every OS (`pkg/tools/builtin/filesystem/filesystem_paths.go`), so `read_file ~/.agents/skills/<name>/workflows/x.md` works on Windows too. issue-team's tester and reviewer do this, and `skills:` is not set for them: it would add the skill's description to the prompt and `read_skill` for `SKILL.md`, but no way to reach the workflow files.
+
+**GitHub skill sources are not in v1.145.0, despite the docs.** `skills: [https://github.com/vx-daniel/number-5/tree/main/skills]` (2026-10-15, public repo, skill present on `main`) gave the agent no skill tools. The debug log (`-d --log-file`) shows why: `Fetching remote skills index url=https://github.com/…/tree/main/skills/.well-known/skills/index.json`, then `Remote skills index returned non-OK status … status=404`. In this version any `https://` entry is a remote *index* URL (`<url>/.well-known/skills/index.json`, entries with a `files` list, which is what lets remote skills get `read_skill_file`); the tree-URL form is documented on `main` only. `debug skills` does not fetch remote sources, so it reported "No skills" without saying why.
 
 **Search paths** (same source): `~/.codex/skills` (recursive), `~/.claude/skills` (flat), `~/.agents/skills` (recursive), then `.claude/skills` in the working directory and `.github/skills` / `.agents/skills` in each directory from the git root down to it. All built with `filepath.Join`, so identical on every OS.
+
+**`instruction_file` accepts only a relative path inside the config directory.** `../skills/x.md`, `/abs/x.md` and `~/x.md` are all rejected at load: `agent "root": instruction_file "../skills/skill.md" must be a local relative path inside the config directory` (`~/…` fails earlier, with `openat ~/…: no such file`). A team therefore cannot inject a skill file from `~/.agents/skills` or from `skills/` in place; issue-team keeps copies under `instructions/skill/` and a test (`test/skill-instructions.test.ts`) fails when a copy differs from its source. Receipt, 2026-10-15, v1.145.0, `debug config` on a scratch team.
 
 ## Platforms
 
@@ -289,5 +407,6 @@ Carried over from `workflows/issue-team/README.md` ("Known limits") or reported 
 - **`permissions.deny` rules cover docker-agent's own shell tool only.** A `harness: claude-code` agent runs Claude Code's tools, outside those rules.
 - **Script tools resolve commands through the docker-agent process's `PATH`.** A helper that is not on `PATH` fails with "command not found" at call time, not at startup. `j5` prepends each team's `path:` directories.
 - **`--worktree`, `--worktree-pr` and `--sandbox` cannot be combined.**
+- **A Sonnet 5.5 `edit_file` call through the proxy once arrived as invalid JSON.** Seen 2026-10-15 in issue-team's first real run (session `7acf06c5…`, tester): `{"path": "…", "edits": [{"oldText">: "", "newText": ""}]}`, answered `Error calling tool: failed to parse edit_file arguments: invalid character '>' after object key`. The tester then edited with `python3` heredocs; the builder never called `edit_file` and made six edits through `shell`. One failure, not a rate, and `edit_file` worked in an earlier probe (same model and proxy). Not known whether the model, the proxy's tool-schema translation or the stream caused it.
 - **On Windows, a multi-line message cannot pass through a `.cmd` / `.bat` `docker`.** cmd.exe ends a command at the first newline. Seen in CI (windows-latest, 2026-10-14): the launch test's fake `docker.cmd` exited 1 once messages became whole prompts, where it had passed with a one-line message; the test now uses a compiled fake. Real Docker is `docker.exe`, which `j5` spawns without cmd.exe, so this should not affect real runs; not yet run on Windows.
 - **A script-tool argument named `path` would replace `PATH` on Windows.** Inferred, not run: docker-agent passes script-tool arguments as environment variables (`script_shell.go`), and Windows environment variable names are case-insensitive. The teams here avoid the name (`test_prescreen` takes `target`).
