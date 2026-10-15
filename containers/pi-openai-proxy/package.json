@@ -1,0 +1,9 @@
+{
+  "name": "j5-pi-openai-proxy-container",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.73.0",
+    "@victor-software-house/pi-openai-proxy": "4.9.5"
+  }
+}

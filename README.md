@@ -10,10 +10,11 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 |---|---|
 | [issue-team](workflows/issue-team/README.md) | GitHub issue → pull request → review follow-up → post-merge closeout, in any repository |
 | [test-quality](workflows/test-quality/README.md) | Audit, review, write or fix tests with the `j5-test-quality` skill, in the current checkout |
+| [pr-reviewer](workflows/pr-reviewer/README.md) | Native, read-only PR review with Claude Sonnet 5.5 through the local proxy; reports locally without posting to GitHub |
 
 ## Quick start
 
-Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), and `claude` logged in to a Claude subscription: every agent is Claude Code (`harness: claude-code`), so no API key is needed. issue-team also needs `gh` logged in; see each team's README.
+Prerequisites: Docker with the `docker agent` plugin (v1.145.0) and [Bun](https://bun.sh). issue-team and test-quality use `claude` logged in to a Claude subscription. pr-reviewer uses the logged-in [proxy container](containers/pi-openai-proxy/README.md) and its local `PI_PROXY_AUTH_TOKEN`, not an Anthropic API key. issue-team and pr-reviewer also need `gh` logged in; see each team's README.
 
 ```bash
 bun scripts/install.ts      # link ~/number-5, add `j5` to your shell, install skills, bun install
@@ -28,6 +29,7 @@ j5                         # or pick everything interactively
 - [docs/launcher.md](docs/launcher.md) — `j5` options and the `workflow.yaml` manifest
 - [docs/new-team.md](docs/new-team.md) — adding a team or experiment
 - [docs/docker-agent/](docs/README.md) — reference, patterns and gotchas
+- [containers/pi-openai-proxy/](containers/pi-openai-proxy/README.md) — pinned subscription-backed model endpoint for native Docker Agent agents
 
 ## Development
 

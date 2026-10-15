@@ -96,7 +96,7 @@ entrypoints:
 
 **Templates.** `message` and `worktree.name` take `{placeholder}`s: any parameter, plus `{repo}` (the project's directory name). An unknown placeholder is a manifest error, never literal text in a prompt. `{{` and `}}` are literal braces, e.g. `gh api repos/{{owner}}/{{repo}}/pulls/{pr}` sends `repos/{owner}/{repo}/pulls/7`.
 
-**The message is the whole prompt** for a team of Claude Code harness agents (both teams here), since docker-agent gives a harness agent nothing else; write it as a YAML block (`message: |`). `--print` shows it in full.
+**Harness versus native prompts.** For issue-team and test-quality, the message is the whole prompt because Docker Agent gives a Claude Code harness agent nothing else; use a YAML block (`message: |`). Native agents such as pr-reviewer load a durable `instruction_file` from `team.yaml` and use the manifest message for task parameters. `--print` shows the manifest message, not native instruction-file contents.
 
 **Worktree modes.**
 
@@ -106,7 +106,15 @@ Worktrees go **beside the project**: `<parent of the checkout>/<name>`, e.g. `~/
 |---|---|---|---|
 | `new` | `worktree.name` from the template; branch `worktree-<name>` | `git fetch origin <base>` (for an `origin/…` base), `git worktree add -b worktree-<name> <path> <base>` | Fresh work from a base branch |
 | `pr` | `<repo>-pr-<n>`; the PR's own branch, tracking `origin/<branch>` | `git fetch origin <branch>`, `git worktree add --track -b <branch> <path> origin/<branch>` (or `git worktree add <path> <branch>` when that local branch exists). Needs `pull_request_parameter: <an integer parameter>` | Continuing a pull request's branch |
+| `pr` with `detached: true` | `<repo>-pr-<n>-detached`; detached HEAD at the fetched PR head | `git fetch origin <branch>`, then `git worktree add --detach <path> FETCH_HEAD` | Read-only reviews without claiming the PR branch |
 | `none` | none; runs in the checkout itself | nothing | Read-only, conversational, or in-place entry points |
+
+`detached` is an optional boolean on a `pr` worktree definition; omitted or false
+keeps the editable behavior. pr-reviewer sets it to true. Its separate directory
+prevents an editable follow-up workflow from reusing a detached review snapshot.
+The fresh fetch, not a possibly stale local branch, selects the review commit.
+A detached snapshot does not require moving a branch checked out elsewhere.
+Existing worktrees are still reused as-is, with no automatic refresh/reset.
 
 **Finding a PR's branch** uses git alone, so it works over an SSH remote with no `gh` login: `git ls-remote origin refs/pull/<n>/head` gives the PR's head commit, and the PR's branch is the one origin branch whose tip is that commit. A PR from a fork (its head is no origin branch), a merged PR whose branch was deleted, and a head shared by several branches are refused with a message. This lookup also runs for `--print` (read-only, needs the network).
 

@@ -52,8 +52,12 @@ const worktreeSchema = z.discriminatedUnion("mode", [
   // A fresh worktree named from a template, branched from a base ref the user picks
   // (default: the remote default branch).
   z.strictObject({ mode: z.literal("new"), name: z.string().min(1) }),
-  // A worktree on an existing pull request's branch; the named parameter holds the PR number.
-  z.strictObject({ mode: z.literal("pr"), pull_request_parameter: z.string().min(1) }),
+  // PR worktrees normally track its branch; read-only workflows can request a detached snapshot.
+  z.strictObject({
+    mode: z.literal("pr"),
+    pull_request_parameter: z.string().min(1),
+    detached: z.boolean().optional(),
+  }),
 ]);
 
 // An entry point that can also run over a queue: once per value of one integer
