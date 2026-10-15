@@ -17,4 +17,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 RUN mkdir -p /home/bun/.pi/agent && chown -R bun:bun /home/bun/.pi
 USER bun
 EXPOSE 4141
-ENTRYPOINT ["bun", "/app/node_modules/@victor-software-house/pi-openai-proxy/dist/index.mjs"]
+# The proxy serves whatever Claude login is in the volume and, left alone, starts with no
+# authentication at all (checked: HTTP 200 on /v1/models with no token). Compose already requires
+# a token, but the image is shared, so it enforces this itself instead of trusting every caller.
+ENTRYPOINT ["sh", "-c", "[ -n \"$PI_PROXY_AUTH_TOKEN\" ] || { echo 'PI_PROXY_AUTH_TOKEN is required: this proxy serves your Claude login and must not run without a bearer token.' >&2; exit 64; }; exec bun /app/node_modules/@victor-software-house/pi-openai-proxy/dist/index.mjs \"$@\"", "proxy"]

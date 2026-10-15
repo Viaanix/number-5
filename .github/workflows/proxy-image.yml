@@ -1,0 +1,148 @@
+# Builds the Pi proxy image (containers/pi-openai-proxy). On a pull request it only builds and
+# smoke-tests; on a push to main it also publishes to GitHub Packages (ghcr.io), where the team
+# pulls it. The image tag comes from containers/pi-openai-proxy/compose.yaml, so the compose file
+# and the registry cannot disagree. The package is linked to this repository by the source label
+# that docker/metadata-action adds, so access follows this repository's permissions until the
+# package is given its own (see containers/pi-openai-proxy/README.md, "Share it with the team").
+name: proxy-image
+
+on:
+  pull_request:
+    paths:
+      - containers/pi-openai-proxy/Dockerfile
+      - containers/pi-openai-proxy/.dockerignore
+      - containers/pi-openai-proxy/package.json
+      - containers/pi-openai-proxy/bun.lock
+      - containers/pi-openai-proxy/patch-usage.ts
+      - containers/pi-openai-proxy/compose.yaml
+      - .github/workflows/proxy-image.yml
+  push:
+    branches: [main]
+    paths:
+      - containers/pi-openai-proxy/Dockerfile
+      - containers/pi-openai-proxy/.dockerignore
+      - containers/pi-openai-proxy/package.json
+      - containers/pi-openai-proxy/bun.lock
+      - containers/pi-openai-proxy/patch-usage.ts
+      - containers/pi-openai-proxy/compose.yaml
+      - .github/workflows/proxy-image.yml
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the image name and a fingerprint of what goes into it
+        id: image
+        run: |
+          # The compose file needs a bearer token to render; this value is never used.
+          image=$(PI_PROXY_AUTH_TOKEN=unused docker compose -f containers/pi-openai-proxy/compose.yaml config --images)
+          case "$image" in
+            ghcr.io/viaanix/*:*) ;;
+            *) echo "::error::compose.yaml must name a ghcr.io/viaanix/<name>:<tag> image, got '$image'"; exit 1 ;;
+          esac
+          # Only files the Dockerfile copies or builds from; compose.yaml and the README are not part of the image.
+          cd containers/pi-openai-proxy
+          inputs=$(cat Dockerfile .dockerignore package.json bun.lock patch-usage.ts | sha256sum | cut -d' ' -f1)
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "inputs=$inputs" >> "$GITHUB_OUTPUT"
+          echo "Image: $image (build inputs $inputs)"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A tag must always mean one build. If it is already published with the same inputs there is
+      # nothing to do (for example a compose.yaml edit that is not a tag bump); with different
+      # inputs, a machine that already pulled it would keep the old image, so fail and say how.
+      - name: Decide whether to publish
+        id: publish
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          INPUTS: ${{ steps.image.outputs.inputs }}
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! docker buildx imagetools inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          docker pull --quiet "$IMAGE" > /dev/null
+          published=$(docker inspect -f '{{ index .Config.Labels "io.github.viaanix.j5.build-inputs" }}' "$IMAGE")
+          if [ "$published" = "$INPUTS" ]; then
+            echo "::notice::$IMAGE is already published from these inputs; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::$IMAGE is already published from different inputs. Bump the tag in containers/pi-openai-proxy/compose.yaml."
+            exit 1
+          fi
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ghcr.io/viaanix/j5-pi-openai-proxy
+
+      # Build for this runner first and check the image before anything is published.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: containers/pi-openai-proxy
+          load: true
+          tags: proxy-smoke:local
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            io.github.viaanix.j5.build-inputs=${{ steps.image.outputs.inputs }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: |
+          # The usage patch is in the shipped file (the build also fails if the pinned package changes).
+          patched=$(docker run --rm --entrypoint grep proxy-smoke:local -c cache_write_tokens /app/node_modules/@victor-software-house/pi-openai-proxy/dist/index.mjs)
+          test "$patched" -ge 1 || { echo "::error::the usage patch is not in the image"; exit 1; }
+          # The image serves a Claude login, so it must refuse to start without a bearer token.
+          # Bounded: an image that did start would run forever, and that has to fail, not hang.
+          docker run -d --name no-token proxy-smoke:local > /dev/null
+          status=$(timeout 30 docker wait no-token || echo timed-out)
+          docker logs no-token 2>&1 | head -3
+          docker rm -f no-token > /dev/null
+          test "$status" = 64 || { echo "::error::expected exit 64 without a token, got '$status'"; exit 1; }
+          # With a token it starts, rejects a missing or wrong bearer and accepts the right one.
+          docker run -d --name smoke -e PI_PROXY_AUTH_TOKEN=smoke-token -p 127.0.0.1:4141:4141 proxy-smoke:local > /dev/null
+          for attempt in $(seq 1 20); do
+            curl -s -o /dev/null http://127.0.0.1:4141/v1/models && break
+            sleep 1
+          done
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@" http://127.0.0.1:4141/v1/models; }
+          test "$(code)" = 401 || { echo "::error::no bearer token was not refused"; docker logs smoke; exit 1; }
+          test "$(code -H 'Authorization: Bearer wrong')" = 401 || { echo "::error::a wrong bearer token was not refused"; exit 1; }
+          test "$(code -H 'Authorization: Bearer smoke-token')" = 200 || { echo "::error::the right bearer token was refused"; docker logs smoke; exit 1; }
+          test "$(docker exec smoke id -u)" = 1000 || { echo "::error::the image does not run as UID 1000"; exit 1; }
+          docker rm -f smoke > /dev/null
+
+      # Both platforms are built on every run, so an arm64 failure shows on the pull request and
+      # not first on main. It is only pushed when this run is the one that publishes the tag.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: containers/pi-openai-proxy
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.publish.outputs.publish == 'true' }}
+          tags: ${{ steps.image.outputs.name }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            io.github.viaanix.j5.build-inputs=${{ steps.image.outputs.inputs }}
+          cache-from: type=gha

@@ -2,7 +2,11 @@ name: j5-pi-openai-proxy
 
 services:
   proxy:
-    image: j5-pi-openai-proxy:4.9.5
+    # The tag is the single source for the published image: .github/workflows/proxy-image.yml
+    # reads it from here. Bump the last number when the Dockerfile, package.json, bun.lock or
+    # patch-usage.ts change; CI refuses to overwrite a tag that is already published, so a
+    # machine can never keep running an older build under the same tag.
+    image: ghcr.io/viaanix/j5-pi-openai-proxy:4.9.5-1
     build:
       context: .
     init: true
