@@ -1,11 +1,11 @@
 name: pr-reviewer
-description: Read-only native PR review through the local pi provider, with a local report only
+description: Native PR review through the local pi provider; returns a report and posts it as one PR comment
 team: team.yaml
 path: [bin]
 
 entrypoints:
   review:
-    description: Review an existing PR in its verified, clean worktree without edits or GitHub writes
+    description: Review an existing PR in its verified, clean worktree without edits, then post the report as a PR comment
     agent: reviewer
     parameters:
       pr: { type: integer, label: Pull request number }
@@ -14,4 +14,4 @@ entrypoints:
       pull_request_parameter: pr
       detached: true
     message: |
-      Review PR #{pr} in the current repository. Produce only the local report defined by your reviewer instructions.
+      Review PR #{pr} in the current repository and follow your reviewer instructions, including publishing the finished report with pr_comment.

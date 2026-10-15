@@ -1,9 +1,10 @@
 # PR reviewer
 
 A native Docker Agent reviewer using the [Pi proxy container](../../containers/pi-openai-proxy/README.md).
-It reviews an existing pull request in a separate worktree and returns a local
-report. It does not post a review, approve/request changes on GitHub, edit code,
-or run the project's tests/builds. Existing workflows are unchanged.
+It reviews an existing pull request in a separate worktree, returns the report
+locally, and posts a finished verdict report as one comment on the PR. It never
+approves or requests changes, edits code, or runs the project's tests/builds.
+Existing workflows are unchanged.
 
 ## Run
 
@@ -94,6 +95,7 @@ The reviewer:
    accounted for; normal code and speculative future failures are not findings.
 4. Repeats `pr_context` immediately before reporting. Head, base, merge base and
    the diff's SHA-256/size/page count must still match the original clean snapshot.
+5. Posts the finished report with `pr_comment` (see [Posting the comment](#posting-the-comment)).
 
 The local report begins with `VERDICT: Ship it`, `Approve-with-nits`, or
 `Needs work`, followed by the PR URL and reviewed SHA, Overview, Findings,
@@ -109,10 +111,11 @@ a passing-CI or runtime-verification claim.
 ## Enforced boundary versus policy
 
 The offered tools are native read-only git operations, filesystem reads/listings/
-searches restricted to `allow_list: ["."]`, and two typed script helpers,
-`pr_context` and `pr_diff`. There is no general shell, filesystem write/delete tool, or GitHub
-publishing tool. The filesystem restriction rejects absolute-path and symlink
-escapes even under `--safety autonomous`.
+searches restricted to `allow_list: ["."]`, and three typed script helpers:
+`pr_context`, `pr_diff` and `pr_comment`. There is no general shell or filesystem
+write/delete tool. The only GitHub write is `pr_comment`, a plain comment: no
+approval, change request or edit. The filesystem restriction rejects absolute-path
+and symlink escapes even under `--safety autonomous`.
 
 The trusted context helper runs only fixed `gh pr view` and read-only git
 commands. It disables external diff drivers, text conversion, fsmonitor hooks
@@ -124,6 +127,35 @@ allowed checkout remain within the filesystem boundary; avoiding their contents
 and resisting prompt injection are reviewer policies, not a secret-filtering
 guarantee. Do not place secrets in the review worktree. The launcher itself may
 fetch refs and create a worktree before starting the read-only agent.
+
+## Posting the comment
+
+`pr_comment` is the reviewer's only write and the one tool not pre-approved in
+`team.yaml`. In the interactive TUI a dialog shows the full comment text and asks
+before each post (answer `T` to always allow it for the session). **Without a
+terminal, `--exec` rejects it** ("The user rejected the tool call") and the
+reviewer reports `Comment not posted`; for an unattended run that should post,
+pass `-- --exec --safety autonomous`, which approves every tool. It posts as the
+account `gh` is using (`gh api user --jq .login`), with a short footer saying it
+is a static review.
+
+The helper refuses, and posts nothing, when:
+
+- the text does not start with a `VERDICT:` line (a `BLOCKED` result is never posted)
+  or has no `Reviewed head SHA:` line;
+- the PR head is no longer the commit the report reviewed, or the checkout is dirty;
+- the text exceeds 30,000 characters;
+- it matches a credential pattern (private key block, API keys, GitHub/Slack tokens,
+  AWS key IDs, JSON web tokens). This is a best-effort filter, not a guarantee.
+
+**Risk:** the report is written by a model from untrusted PR content and can be read
+by everyone with access to the repository. A malicious PR could try to make the
+reviewer quote a file from the checkout. The refusals above and the reviewer's
+instructions reduce this; they do not remove it. Read the text at the approval
+prompt for PRs you do not trust, and do not keep secrets in the review worktree.
+
+Posting twice creates two comments. A comment is not an approval and does not
+replace the maintainers' review.
 
 ## Worktree limits
 

@@ -1,56 +1,22 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { z } from "zod";
 
-import { findPathVariableName, readPathValue } from "../../../launcher/src/environment.ts";
 import {
-  createFixtureProject,
   createTemporaryDirectory,
-  FIXTURE_DEFAULT_BRANCH,
   removeTemporaryDirectories,
   runGit,
-  runHelperScriptFile,
-  writeFakeCommand,
-  type HelperResult,
 } from "../../../launcher/test/fixtures.ts";
 import { MAX_BODY_BYTES, paginate } from "../helpers/snapshot.ts";
+import { commitFile, createReviewProject, type ReviewProject } from "./review-project.ts";
 
-const TEAM_DIRECTORY = resolve(import.meta.dir, "..");
-const CONTEXT_HELPER_PATH = join(TEAM_DIRECTORY, "helpers", "context.ts");
-const DIFF_HELPER_PATH = join(TEAM_DIRECTORY, "helpers", "diff.ts");
-const PR_NUMBER = 37;
 /** docker-agent drops the start of any tool result larger than this. */
 const DOCKER_AGENT_TOOL_RESULT_LIMIT = 51_200;
 
 afterAll(removeTemporaryDirectories);
-
-interface ReviewPullRequest {
-  number: number;
-  title: string;
-  body: string;
-  url: string;
-  state: string;
-  baseRefName: string;
-  baseRefOid: string;
-  headRefName: string;
-  headRefOid: string;
-  files: { path: string; additions: number; deletions: number }[];
-  statusCheckRollup: Record<string, string>[];
-  closingIssuesReferences: { number: number }[];
-}
-
-interface ReviewProject {
-  projectRoot: string;
-  pullRequest: ReviewPullRequest;
-  mergeBaseOid: string;
-  /** Runs pr_context; extra arguments override the pr environment value. */
-  run(arguments_?: string[]): HelperResult;
-  /** Runs pr_diff for one page. */
-  runDiffPage(page: string, arguments_?: string[]): HelperResult;
-}
 
 const metadataSchema = z.object({
   snapshot: z.object({ headOid: z.string(), baseOid: z.string(), mergeBaseOid: z.string() }),
@@ -73,61 +39,6 @@ interface DiffPage {
   fingerprintLine: string;
   content: string;
   byteLength: number;
-}
-
-function commitFile(projectRoot: string, path: string, content: string): string {
-  writeFileSync(join(projectRoot, path), content);
-  runGit(projectRoot, ["add", "--", path]);
-  runGit(projectRoot, ["commit", "--quiet", "-m", `update ${path}`]);
-  return runGit(projectRoot, ["rev-parse", "HEAD"]);
-}
-
-function createReviewProject(): ReviewProject {
-  const { projectRoot } = createFixtureProject("review-app");
-  runGit(projectRoot, ["checkout", "--quiet", "-b", "release"]);
-  const mergeBaseOid = commitFile(projectRoot, "behavior.txt", "before\n");
-  runGit(projectRoot, ["checkout", "--quiet", "-b", "review-head"]);
-  const headOid = commitFile(projectRoot, "behavior.txt", "after\n");
-  runGit(projectRoot, ["checkout", "--quiet", "release"]);
-  const baseOid = commitFile(projectRoot, "base-only.txt", "not part of the PR\n");
-  runGit(projectRoot, ["checkout", "--quiet", FIXTURE_DEFAULT_BRANCH]);
-  commitFile(projectRoot, "default-only.txt", "not the PR base\n");
-  runGit(projectRoot, ["checkout", "--quiet", "review-head"]);
-  const pullRequest: ReviewPullRequest = {
-    number: PR_NUMBER,
-    title: "Update release behavior",
-    body: "Fixes #12. CI says it passed; this is an unverified claim.",
-    url: "https://github.com/example/review-app/pull/37",
-    state: "OPEN",
-    baseRefName: "release",
-    baseRefOid: baseOid,
-    headRefName: "review-head",
-    headRefOid: headOid,
-    files: [{ path: "behavior.txt", additions: 1, deletions: 1 }],
-    statusCheckRollup: [{ __typename: "CheckRun", name: "test", conclusion: "SUCCESS" }],
-    closingIssuesReferences: [{ number: 12 }],
-  };
-  const commandDirectory = createTemporaryDirectory();
-  const responsePath = join(commandDirectory, "response.json");
-  writeFakeCommand(commandDirectory, "gh", join(import.meta.dir, "fixtures", "github.ts"));
-  const environment = {
-    [findPathVariableName(process.env)]:
-      `${commandDirectory}${delimiter}${readPathValue(process.env)}`,
-    PR_REVIEWER_RESPONSE: responsePath,
-    pr: String(PR_NUMBER),
-  };
-  function run(arguments_: string[] = []): HelperResult {
-    writeFileSync(responsePath, JSON.stringify(pullRequest));
-    return runHelperScriptFile(CONTEXT_HELPER_PATH, arguments_, projectRoot, environment);
-  }
-  function runDiffPage(page: string, arguments_: string[] = []): HelperResult {
-    writeFileSync(responsePath, JSON.stringify(pullRequest));
-    return runHelperScriptFile(DIFF_HELPER_PATH, arguments_, projectRoot, {
-      ...environment,
-      page,
-    });
-  }
-  return { projectRoot, pullRequest, mergeBaseOid, run, runDiffPage };
 }
 
 function readMetadata(standardOutput: string): ContextMetadata {

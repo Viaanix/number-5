@@ -51,9 +51,21 @@ agents:
                 type: integer
                 description: Page number, from 1 through the page count reported by pr_context
             required: [pr, page]
+          pr_comment:
+            cmd: pr-reviewer-comment
+            description: Posts your finished review report as one plain comment on the verified PR. Call it once, after the final context gate, with the exact report text. Only a report starting with a VERDICT line is accepted; BLOCKED results, a report for an old head commit, a dirty checkout or text containing a credential are refused. This cannot approve or request changes.
+            args:
+              pr:
+                type: integer
+                description: Positive pull request number requested by the user
+              body:
+                type: string
+                description: The complete final report, exactly as you will return it, starting with the VERDICT line
+            required: [pr, body]
 
-# Every tool this reviewer has is read-only, so none needs a confirmation prompt.
-# Name them rather than using --safety autonomous: a tool added later still asks.
+# The 12 read-only tools need no confirmation prompt. pr_comment is left off this list
+# on purpose: it is the only tool that writes to GitHub, so it asks before each post.
+# Name tools rather than using --safety autonomous: a tool added later still asks.
 permissions:
   allow:
     - read_file
