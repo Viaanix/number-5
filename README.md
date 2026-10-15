@@ -14,6 +14,8 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 ## Quick start
 
+**New to this, or on Windows or macOS?** Follow the step-by-step [Getting started guide](docs/getting-started.md): every tool, token and command, for Linux, macOS and Windows.
+
 Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), `git` and `gh`. issue-team and pr-reviewer use the logged-in [proxy container](containers/pi-openai-proxy/README.md) and its local `PI_PROXY_AUTH_TOKEN`, not an Anthropic API key; test-quality uses `claude` logged in to a Claude subscription. `j5 setup` checks all of this.
 
 **Install the package** (teammates; needs a one-time registry token, see [docs/packaging.md](docs/packaging.md#install-teammates)):
