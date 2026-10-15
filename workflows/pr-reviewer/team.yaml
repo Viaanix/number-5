@@ -52,6 +52,23 @@ agents:
                 description: Page number, from 1 through the page count reported by pr_context
             required: [pr, page]
 
+# Every tool this reviewer has is read-only, so none needs a confirmation prompt.
+# Name them rather than using --safety autonomous: a tool added later still asks.
+permissions:
+  allow:
+    - read_file
+    - read_multiple_files
+    - list_directory
+    - directory_tree
+    - search_files_content
+    - git_status
+    - git_log
+    - git_branches
+    - git_show
+    - git_blame
+    - pr_context
+    - pr_diff
+
 flavors:
   low:
     models:

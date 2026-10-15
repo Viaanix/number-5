@@ -35,12 +35,16 @@ j5 pr-reviewer review --pr 123 --effort low
 j5 pr-reviewer review --pr 123 --project ~/code/app --print
 ```
 
-Without the installed alias, use this repository's `bin/j5`. A non-interactive
-review with automatic approval of the bounded tools is:
+Without the installed alias, use this repository's `bin/j5`. The reviewer's 12
+tools are all read-only and are pre-approved by name in `team.yaml`
+(`permissions.allow`), so a review runs without per-call prompts. A tool added
+later still asks. For a non-interactive run, add `--exec`:
 
 ```bash
-j5 pr-reviewer review --pr 123 -- --exec --safety autonomous
+j5 pr-reviewer review --pr 123 -- --exec
 ```
+
+`--safety autonomous` is not needed and would also approve any tool you add later.
 
 The team defines its own provider, so `~/.config/cagent/config.yaml` is optional.
 The endpoint is `http://127.0.0.1:4141/v1`; change the team's provider URL if you
