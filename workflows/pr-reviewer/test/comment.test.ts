@@ -54,6 +54,19 @@ describe("pr-reviewer-comment", () => {
     expect(project.runComment(finishedReport(project, verdict)).exitCode).toBe(0);
   });
 
+  test("drops an invented 'Comment posted' line from the posted text, keeping the rest", () => {
+    const project = createReviewProject();
+    const report = finishedReport(project);
+    const result = project.runComment(
+      `${report}\nComment posted: https://github.com/example/review-app/pull/37#issuecomment-pending\n`,
+    );
+    expect(result.exitCode).toBe(0);
+    const posted = project.postedComment() ?? "";
+    expect(posted).toStartWith(report.trimEnd());
+    expect(posted).not.toContain("Comment posted:");
+    expect(posted).not.toContain("issuecomment-pending");
+  });
+
   test.each([
     ["a BLOCKED result", "BLOCKED: pr_context failed\nPR: 37\nReview verdict: Not issued.\n"],
     ["text before the verdict line", "Here is my review.\nVERDICT: Ship it\n"],

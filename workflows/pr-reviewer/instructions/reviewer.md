@@ -74,7 +74,7 @@ Evidence limits: <specific unavailable external requirements, runtime evidence o
 Pre-existing issues noticed, with citations; or None. No unrelated fixes requested as conditions of approval.
 ```
 
-After the report, add one last line, which you must not include in the text you post: `Comment posted: <URL printed by pr_comment>` or `Comment not posted: <short reason>`.
+After the report, add one last line, which you must not include in the text you post: `Comment posted: <URL printed by pr_comment>` or `Comment not posted: <short reason>`. You only know the URL after `pr_comment` returns, so write this line only in your final reply, never before or inside the call. The helper strips any such line from the posted text.
 
 For a refusal or failed gate, use only this failure format, omit a verdict, and never post it:
 

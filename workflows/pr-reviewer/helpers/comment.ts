@@ -2,7 +2,7 @@
 // reviewer's only GitHub write: a plain comment, never an approval or change request.
 
 import { runHelper } from "../../../launcher/src/team-helper.ts";
-import { requirePostableReport } from "./report.ts";
+import { requirePostableReport, stripLocalStatusLines } from "./report.ts";
 import { parsePullRequestNumber, readSnapshot, verifyCheckout } from "./snapshot.ts";
 
 const FOOTER =
@@ -10,7 +10,7 @@ const FOOTER =
 
 runHelper("pr-reviewer-comment", () => {
   const pullRequestNumber = parsePullRequestNumber();
-  const report = process.env.body ?? "";
+  const report = stripLocalStatusLines(process.env.body ?? "");
   const reviewedHead = requirePostableReport(report);
   const snapshot = readSnapshot(pullRequestNumber);
   verifyCheckout(snapshot.headRefOid);

@@ -62,3 +62,11 @@ export function requirePostableReport(report: string): string {
   }
   return reviewedHead;
 }
+
+/**
+ * Removes the reviewer's local-only "Comment posted/not posted" lines. The posted text
+ * cannot know the comment's URL, and a model that writes the line early invents one.
+ */
+export function stripLocalStatusLines(report: string): string {
+  return report.replace(/^Comment (?:not )?posted:.*(?:\r?\n|$)/gm, "");
+}
