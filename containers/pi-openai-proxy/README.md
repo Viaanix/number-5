@@ -165,9 +165,12 @@ fails instead of shipping an unpatched proxy.
 Checked offline in a throwaway container (no network, no login): the patched file differs from
 the original only in that function, 4 + 9000 + 642 input tokens give `prompt_tokens` 9646 with
 `completion_tokens` 4 and `total_tokens` 9650, and running the patch step a second time exits 1.
-**Not yet checked end to end.** After `docker compose build` and a restart (which interrupts
-any run in progress), repeat a streamed request with a long prompt and confirm `prompt_tokens`
-is close to `total_tokens − completion_tokens`.
+
+Checked end to end on 2026-10-15, after `docker compose build` and a recreate: a streamed request
+with a ~9,650-token prompt returned `prompt_tokens` 9646, `completion_tokens` 4, `total_tokens` 9650
+(it was `prompt_tokens` 4 before the patch), with `cache_write_tokens` 9642 on the first call and
+`cached_tokens` 9642 on repeats; the non-streamed response agreed. Not yet watched: a real run's
+token counter accumulating in the Docker Agent sidebar.
 
 ## Upstream status and the fork
 
