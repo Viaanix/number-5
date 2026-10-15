@@ -20,6 +20,13 @@ import { copySkill, inspectSkill, listSkillPlacements } from "./skills.ts";
 /** The docker-agent release the teams were written and tested against (CI installs the same). */
 export const TESTED_DOCKER_AGENT_VERSION = "v1.145.0";
 
+/**
+ * The oldest Bun this package is meant for. Equal to the `engines.bun` floor in package.json and to
+ * the version CI installs; a test keeps all three together. Older Bun versions may still work, so
+ * setup warns instead of failing.
+ */
+export const MINIMUM_BUN_VERSION = "1.4.2";
+
 const SUCCESS_EXIT_CODE = 0;
 const FAILURE_EXIT_CODE = 1;
 // What a shell reports for a command it cannot find; used for an executable that is missing.
@@ -167,12 +174,32 @@ function firstLine(text: string): string {
   return text.split("\n")[0] ?? "";
 }
 
+/** True when `version` ("1.3.13") is lower than `minimum` ("1.4.2"), comparing numeric parts. */
+function isOlderVersion(version: string, minimum: string): boolean {
+  const versionParts = version.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const minimumParts = minimum.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  for (let index = 0; index < Math.max(versionParts.length, minimumParts.length); index += 1) {
+    const difference = (versionParts[index] ?? 0) - (minimumParts[index] ?? 0);
+    if (difference !== 0) {
+      return difference < 0;
+    }
+  }
+  return false;
+}
+
 function checkCommandLineTools(
   environment: SetupEnvironment,
   options: SetupOptions,
   reporter: Reporter,
 ): void {
-  reporter.line("ok", `bun ${environment.bunVersion}`);
+  if (isOlderVersion(environment.bunVersion, MINIMUM_BUN_VERSION)) {
+    reporter.line(
+      "warning",
+      `bun ${environment.bunVersion} is older than ${MINIMUM_BUN_VERSION}, which number-5 requires (package.json engines) and is tested with; upgrade with: bun upgrade`,
+    );
+  } else {
+    reporter.line("ok", `bun ${environment.bunVersion}`);
+  }
 
   const gitVersion = environment.runCommand(["git", "--version"]);
   if (gitVersion.exitCode === SUCCESS_EXIT_CODE) {
@@ -209,11 +236,13 @@ function checkCommandLineTools(
     "{{.Server.Version}}",
   ]);
   if (daemonVersion.exitCode !== SUCCESS_EXIT_CODE) {
-    // The teams only need the docker CLI plugin; the proxy needs a running daemon.
-    reporter.line(
-      options.withProxy ? "missing" : "warning",
-      "the Docker daemon is not running (the proxy needs it)",
-    );
+    // The teams only need the docker CLI plugin; the proxy needs a daemon this user can reach.
+    // "Permission denied" is a different problem from a stopped daemon with a different fix: on
+    // Linux the user is usually just not in the docker group.
+    const daemonProblem = daemonVersion.standardError.toLowerCase().includes("permission denied")
+      ? "Docker is running but this user may not use it (permission denied on the Docker socket). On Linux run: sudo usermod -aG docker $USER, then log out and back in, or run: newgrp docker. Members of that group have root-equivalent access to the machine"
+      : "the Docker daemon is not running or cannot be reached (the proxy needs it)";
+    reporter.line(options.withProxy ? "missing" : "warning", daemonProblem);
   }
 
   const dockerAgentVersion = environment.runCommand(["docker", "agent", "version"]);
