@@ -123,6 +123,16 @@ compatibility. Keep model-specific request settings explicit and verify the tool
 loop, not only model discovery. This receipt does not establish signed-history
 portability or thinking visibility through an OpenAI translator.
 
+### Token counters through the proxy ignore cached input, so compaction cannot trigger
+
+**Observed:** v1.145.0, pi-openai-proxy 4.9.5, Haiku 5.5, 2026-10-15, while watching a real issue-team run whose sidebar showed 768 then 354 tokens and `$0.00`.
+
+**Receipt:** a streamed `/v1/chat/completions` request with a ~9,600-token system prompt returned `usage: {prompt_tokens: 4, completion_tokens: 4, total_tokens: 9650}`; the same through a non-streamed request and a repeat of the prompt. `session.db` agreed: a whole root session recorded `input_tokens = 2`, no `usage_json` on any item. In the proxy, `mapUsage()` (`dist/index.mjs:555`) sets `prompt_tokens: usage.input`, and Pi's `input` excludes `cacheRead` and `cacheWrite`.
+
+**Why it matters:** Docker Agent builds its context size from the reported prompt and completion tokens (`SessionUsage`, `ContextLength: input + output`) and its proactive compaction decision from the same counters (`compaction.ShouldCompact(inputTokens, outputTokens, …, contextLimit, threshold)`). Reading the source at the installed commit, not testing it, this means the 90% trigger can never fire; only the after-the-fact overflow recovery remains, and that has not been exercised through the proxy. Cost shows `$0.00` for a separate reason (no price for `pi/…` models) and is not fixed by this.
+
+**Fix:** `containers/pi-openai-proxy/patch-usage.ts` rewrites `mapUsage()` at build time so `prompt_tokens` is the whole prompt (`input + cacheRead + cacheWrite`) with `prompt_tokens_details.cached_tokens` and `cache_write_tokens`, which Docker Agent's Chat Completions adapter (`oaistream/adapter.go`) subtracts to recover the fresh part. Verified offline only (the diff is that one function; 4 + 9000 + 642 in gives `prompt_tokens` 9646, so 9646 + 4 = 9650 = `total_tokens`; a second run of the patch step exits 1). **Not yet verified end to end:** rebuild, restart, repeat the request and see `prompt_tokens` near `total_tokens − completion_tokens`, then watch a run's counters accumulate.
+
 ### A script tool result over 51,200 bytes is cut to its tail
 
 **Observed:** Docker Agent v1.145.0, Linux, 2026-10-15, real run of
@@ -160,19 +170,6 @@ shell {"cmd": "sleep 32 && echo slept once", "timeout": 60}   -> slept once
 **Consequence:** an installs, build or test-suite command needs an explicit `timeout`,
 so the issue-team instructions say to pass one. Each call also starts a fresh shell:
 `cd` and variables do not carry over.
-
-### `read_skill` cannot read a skill's supporting files
-
-**Observed:** v1.145.0, 2026-10-15, an agent with `skills: [j5-test-quality]`.
-
-**Receipt:** `debug toolsets` listed only `read_skill` for it, and
-`read_skill {"name": "j5-test-quality/workflows/generate.md"}` returned
-`skill "j5-test-quality/workflows/generate.md" not found`. `read_skill {"name":
-"j5-test-quality"}` returned the 6 KB `SKILL.md` only.
-
-**Consequence:** a skill that points at workflow files needs `read_file` on its
-directory. issue-team's tester and reviewer read `~/.agents/skills/j5-test-quality/…`
-that way and no longer use the `skills:` setting.
 
 ### Filesystem tools accept `~/…` paths, and `allow_list` expands `~`
 
@@ -366,11 +363,15 @@ The TUI header shows the worktree path either way. Seen in a real `work-issue` r
 
 **Observed:** v1.145.0, 2026-10-14.
 
-**Receipt:** `docker agent debug toolsets` for an agent with `skills: [j5-test-quality]` (installed in `~/.agents/skills`) lists only `read_skill`. In the source, `read_skill_file` is offered only when a skill has supporting files listed (`pkg/tools/builtin/skills/skills.go`), which local skills never do.
+**Receipt:** `docker agent debug toolsets` for an agent with `skills: true`, `[j5-test-quality]`, `[local, j5-test-quality]` or `[local]` (the skill installed in `~/.agents/skills`) lists only `read_skill` in every case. In a real run (2026-10-15, Sonnet 5.5 through the proxy) the agent got the 6 KB `SKILL.md` from `read_skill {"name": "j5-test-quality"}`, then `read_skill {"name": "j5-test-quality/workflows/generate.md"}` returned `skill "…" not found` and it was never offered another tool. The source at the installed commit (`docker agent version` → 502549c) explains it: `read_skill_file` is registered only when some loaded skill has more than one entry in `Skill.Files` (`pkg/tools/builtin/skills/skills.go`, `hasFiles()`), and `Files` is assigned only for remote-index skills (`pkg/skills/remote.go`); `pkg/skills/local.go` sets `FilePath` and `BaseDir` and never `Files`. The docs page tracks `main` and describes `read_skill_file` for `SKILL.md` directories without this limit.
 
-**Consequence:** instructions must point at a local skill's other files by path. The filesystem tools expand a leading `~/` on every OS (`pkg/tools/builtin/filesystem/filesystem_paths.go`), so `read_file ~/.agents/skills/<name>/workflows/x.md` works on Windows too.
+**Consequence:** instructions must point at a local skill's other files by path. The filesystem tools expand a leading `~/` on every OS (`pkg/tools/builtin/filesystem/filesystem_paths.go`), so `read_file ~/.agents/skills/<name>/workflows/x.md` works on Windows too. issue-team's tester and reviewer do this, and `skills:` is not set for them: it would add the skill's description to the prompt and `read_skill` for `SKILL.md`, but no way to reach the workflow files.
+
+**GitHub skill sources are not in v1.145.0, despite the docs.** `skills: [https://github.com/vx-daniel/number-5/tree/main/skills]` (2026-10-15, public repo, skill present on `main`) gave the agent no skill tools. The debug log (`-d --log-file`) shows why: `Fetching remote skills index url=https://github.com/…/tree/main/skills/.well-known/skills/index.json`, then `Remote skills index returned non-OK status … status=404`. In this version any `https://` entry is a remote *index* URL (`<url>/.well-known/skills/index.json`, entries with a `files` list, which is what lets remote skills get `read_skill_file`); the tree-URL form is documented on `main` only. `debug skills` does not fetch remote sources, so it reported "No skills" without saying why.
 
 **Search paths** (same source): `~/.codex/skills` (recursive), `~/.claude/skills` (flat), `~/.agents/skills` (recursive), then `.claude/skills` in the working directory and `.github/skills` / `.agents/skills` in each directory from the git root down to it. All built with `filepath.Join`, so identical on every OS.
+
+**`instruction_file` accepts only a relative path inside the config directory.** `../skills/x.md`, `/abs/x.md` and `~/x.md` are all rejected at load: `agent "root": instruction_file "../skills/skill.md" must be a local relative path inside the config directory` (`~/…` fails earlier, with `openat ~/…: no such file`). A team therefore cannot inject a skill file from `~/.agents/skills` or from `skills/` in place; issue-team keeps copies under `instructions/skill/` and a test (`test/skill-instructions.test.ts`) fails when a copy differs from its source. Receipt, 2026-10-15, v1.145.0, `debug config` on a scratch team.
 
 ## Platforms
 

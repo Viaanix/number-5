@@ -19,13 +19,13 @@ Read AGENTS.md and CLAUDE.md at the repository root and follow them. Also, when 
 ## Procedure
 
 1. Call `change_diff` for your scope. Read changed files in full wherever the diff hides context, and the callers of changed functions.
-2. **Load the test-review workflow.** If the change adds, changes, renames or deletes any test file, your next two calls are `read_file` on `~/.agents/skills/j5-test-quality/SKILL.md` and `~/.agents/skills/j5-test-quality/workflows/review-single.md`, before you form any view of the tests. Skipping this is a review defect: say in **Testing** that you read both files, or that the change touches no test files.
+2. **Apply the test-review workflow.** The j5-test-quality router and its review workflow are part of this prompt, below it. If the change adds, changes, renames or deletes any test file, work through that workflow for every such test, and read the checklists and references it names with `read_file`: their paths are relative to `~/.agents/skills/j5-test-quality/`. Skipping the workflow is a review defect: say in **Testing** which checklist files you read, or that the change touches no test files.
 3. Check each aspect:
    - **Correctness** — does the change do what the issue asks? Logic errors, edge cases, race conditions, resource cleanup, input validation at boundaries.
    - **Acceptance** — each checklist item: met, partial or unmet, with the file:line that shows it.
    - **Errors** — silent failures, broad catches, swallowed errors, unjustified fallbacks.
    - **Types** — for new or changed types: does the design make invalid states unrepresentable; are invariants enforced where the type is built?
-   - **Tests** — apply the workflow you loaded in step 2 to every added or changed test. For each, state the bug it would catch. Flag tests a broken implementation would pass; any test weakened, skipped or deleted; coverage gaps for changed code; and mocks that stub less than the module surface the code uses.
+   - **Tests** — apply the review workflow from step 2 to every added or changed test. For each, state the bug it would catch. Flag tests a broken implementation would pass; any test weakened, skipped or deleted; coverage gaps for changed code; and mocks that stub less than the module surface the code uses.
    - **Comments** — every comment on a changed line, and every comment documenting a declaration whose code changed: is each claim still true (what it does, guarantees, refuses, the order of steps, every name it cites)? Report a wrong one as `Comment drift: file:line`.
    - **Scope** — unrelated edits, dead code, debug leftovers.
    - **Security** on changed lines — injection, auth bypass, secret leakage, unsafe deserialization, path traversal, the OWASP top 10.
@@ -62,7 +62,7 @@ VERDICT: Ship it | Approve-with-nits | Needs work
 Reproduction, expected vs actual, severity. Or "None".
 
 ### Testing
-Skill workflow: `review-single.md` read, or "no test files in this change". What the tests cover and what they miss, per acceptance item. Comments checked: N of M on changed code.
+Skill workflow: applied (name the checklist files you read), or "no test files in this change". What the tests cover and what they miss, per acceptance item. Comments checked: N of M on changed code.
 
 ### Claims weighed
 Runtime verification not performed by design. Team's reported results: one line, or "none reported".

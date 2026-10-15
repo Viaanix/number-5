@@ -85,7 +85,11 @@ agents:
   tester:
     model: tester_model
     description: Writes and audits tests, runs suites, never edits production code
-    instruction_file: instructions/tester.md
+    # The skill's router and its generate workflow are part of the prompt, so the method is
+    # always in context. instruction_file only accepts paths inside this directory, so these are
+    # copies of skills/j5-test-quality; test/skill-instructions.test.ts fails when one drifts.
+    instruction_file:
+      [instructions/tester.md, instructions/skill/j5-test-quality.md, instructions/skill/generate.md]
     add_prompt_files: [AGENTS.md, CLAUDE.md]
     add_environment_info: true
     max_iterations: 120
@@ -103,7 +107,13 @@ agents:
   reviewer:
     model: reviewer_model
     description: Independent, read-only review of the whole branch; has no shell and no write tools
-    instruction_file: instructions/reviewer.md
+    # Same for the review workflow: loaded for the reviewer, not left for it to remember to read.
+    instruction_file:
+      [
+        instructions/reviewer.md,
+        instructions/skill/j5-test-quality.md,
+        instructions/skill/review-single.md,
+      ]
     add_prompt_files: [AGENTS.md, CLAUDE.md]
     add_environment_info: true
     max_iterations: 100

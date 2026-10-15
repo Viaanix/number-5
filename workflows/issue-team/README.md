@@ -96,9 +96,14 @@ Each issue runs `work-issue` on its own, in its own worktree, with `--exec`: nob
 Worktrees sit beside the checkout and carry the repository name, so the same number in two repositories never collides. Running the same stage again continues in its existing worktree. Details: [docs/launcher.md](../../docs/launcher.md#the-manifest-workflowsteamworkflowyaml).
 
 ```bash
-# Resume the newest session. Start it inside the stage's worktree (or pass --working-dir
-# <worktree>): a resumed session does not remember its working directory.
-cd ~/code/my-app-issue-123 && docker agent run "$HOME/number-5/workflows/issue-team/team.yaml" --session -1
+# Resume a stage, for example to answer a question it stopped with (a new `j5 … --issue N`
+# starts a fresh session and asks again). Do by hand what j5 does: run in the stage's
+# worktree, put the team's bin/ on PATH (the typed tools call the helpers by name, and fail
+# with "command not found" without it), and name the entry agent. `--session -1` is the newest
+# session of any team; pass a session id instead when other runs started since.
+TEAM="$HOME/number-5/workflows/issue-team"
+cd ~/code/my-app-issue-123 && PATH="$TEAM/bin:$PATH" docker agent run "$TEAM/team.yaml" \
+  --agent root --working-dir "$PWD" --session -1
 
 # Read a past session without sending anything
 docker agent run "$HOME/number-5/workflows/issue-team/team.yaml" --session -1 --session-read-only
@@ -111,6 +116,6 @@ Worktrees are never removed automatically: use `git worktree list` and `git work
 - **Not yet run for real.** Validated and dry-run only; no stage has run against a GitHub repository since the move to native agents.
 - **No follow-up or closeout stage.** Addressing review comments on the PR, and closing issues after merge, are done by hand. The `pr-followup` and `closeout` entry points were removed.
 - **Opus is unavailable.** The reviewer used to run on Opus. Anthropic rejects `claude-opus-5-5` for the proxy's login ("Claude Code 2.1.75 does not support this model; version 2.1.280 or newer is required"), so every role uses Sonnet 5.5.
-- **Long runs through the proxy are unproven.** Context compaction and token refresh over a multi-hour issue have not been exercised. A shell call is killed after 30 seconds unless the agent passes a `timeout`; the instructions say to.
-- **Skill files**: the agents read `~/.agents/skills/j5-test-quality/` by path. docker-agent has no tool to read a skill's supporting files in v1.145.0 (`read_skill` returns only `SKILL.md`), which is why they use `read_file`.
+- **Long runs through the proxy are unproven.** Context compaction and token refresh over a multi-hour issue have not been exercised. The proxy reported only uncached input as `prompt_tokens`, so Docker Agent's counters, and with them its compaction trigger, saw about 0.04% of the real context; a build-time patch fixes the report but has only been checked offline ([gotcha](../../docs/docker-agent/gotchas.md#token-counters-through-the-proxy-ignore-cached-input-so-compaction-cannot-trigger)). A shell call is killed after 30 seconds unless the agent passes a `timeout`; the instructions say to.
+- **Skill files**: the tester's and reviewer's prompts include the skill's router and their workflow (`instructions/skill/`, copies kept identical to `skills/j5-test-quality` by a test), so the method is always in context. The checklists and references those workflows name are still read by path with `read_file` from `~/.agents/skills/j5-test-quality/`, and whether the agent reads them is up to it: the reviewer must name the ones it read in its report. docker-agent registers `read_skill_file` only for skills that list supporting files, which local skills never do in v1.145.0 ([gotcha](../../docs/docker-agent/gotchas.md#local-skills-get-read_skill-but-no-read_skill_file)).
 - **Docs vs. version**: docker.github.io tracks `main` and documents flags v1.145.0 lacks (`--last`). Check `docker agent run --help`.

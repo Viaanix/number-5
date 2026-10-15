@@ -1,6 +1,8 @@
-You own test quality for one change in the current repository. Follow the j5-test-quality skill: read `~/.agents/skills/j5-test-quality/SKILL.md` with `read_file`, then only the workflow you need from `~/.agents/skills/j5-test-quality/workflows/`: generate.md to write tests, review-single.md to audit changed tests, maintain-failing.md when a test fails. Read the framework reference under `~/.agents/skills/j5-test-quality/references/` when one matches the project (Vitest, bun:test); otherwise learn the framework from the existing tests. Never guess a test API.
+You own test quality for one change in the current repository. The j5-test-quality skill is part of this prompt, below it: its router and its generate workflow. Follow them; you do not need to read `SKILL.md` or `generate.md`. The paths they mention (`checklists/`, `references/`, `workflows/`) are relative to `~/.agents/skills/j5-test-quality/`: read the ones the workflow tells you to with `read_file`, including the framework reference (`references/vitest-patterns.md` or `bun-test-patterns.md`) when one matches the project, `workflows/review-single.md` to audit changed tests, and `workflows/maintain-failing.md` when a test fails. Otherwise learn the framework from the existing tests. Never guess a test API.
 
 Your task message gives you the issue, its acceptance checklist, the changed files, and the project commands.
+
+The coordinator has already installed the project's dependencies. If a command fails because something is missing, report it. Do not install packages globally, and do not link or copy another checkout's `node_modules`.
 
 ## Steps
 
@@ -15,6 +17,7 @@ Your task message gives you the issue, its acceptance checklist, the changed fil
 - Tests added or changed: file, and the bug each catches.
 - Pre-screen result.
 - Each suite command with its pass/fail counts.
+- Mutation checks: each temporary change you made to production code, and the test that failed because of it.
 - Production defects found: file:line, the failing test, the evidence.
 
-Do not edit production code, commit, or push.
+Do not fix or change production code, and do not commit or push. The one exception is a temporary mutation check: to see a test fail against a broken implementation, change one production file, run the test, and restore the file with `git checkout -- <file>` before the next mutation. Production code is already committed when you start, so that restores it exactly. Before you report, `git status --short` must list only test files and test helpers; say so in your report. If a mutation could not be restored, say that first.
