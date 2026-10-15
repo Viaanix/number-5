@@ -6,8 +6,11 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { z } from "zod";
+
 import {
   type CommandResult,
+  MINIMUM_BUN_VERSION,
   type ProxyModelsResult,
   runSetup,
   type SetupEnvironment,
@@ -46,6 +49,7 @@ type HarnessOptions = {
   /** Answers to the proxy's model request, in call order; the last one repeats. */
   proxyAnswers?: ProxyModelsResult[];
   skills?: Record<string, string>;
+  bunVersion?: string;
 };
 
 function createHarness(harnessOptions: HarnessOptions = {}) {
@@ -70,7 +74,7 @@ function createHarness(harnessOptions: HarnessOptions = {}) {
     homeDirectory,
     platform: process.platform,
     environmentVariables: harnessOptions.environmentVariables ?? {},
-    bunVersion: "1.4.2",
+    bunVersion: harnessOptions.bunVersion ?? "1.4.2",
     runCommand: (commandWords) => commands[commandWords.join(" ")] ?? NOT_FOUND,
     runAttached: (commandWords) => {
       attachedCommands.push(commandWords);
@@ -172,6 +176,60 @@ describe("prerequisites", () => {
     const withProxy = createHarness({ commands });
     expect(await withProxy.run({ checkOnly: true, withProxy: true })).toBe(1);
     expect(withProxy.linesStartingWith("missing").join("\n")).toContain("daemon is not running");
+  });
+
+  // Seen on a teammate's machine: the daemon was running, but their user was not in the docker
+  // group. Telling them "the daemon is not running" sent them to restart Docker, which fixes nothing.
+  test("a permission error on the Docker socket is not reported as a stopped daemon", async () => {
+    const permissionDenied: CommandResult = {
+      exitCode: 1,
+      standardOutput: "",
+      standardError:
+        "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock",
+    };
+    const harness = createHarness({
+      commands: { "docker version --format {{.Server.Version}}": permissionDenied },
+    });
+
+    expect(await harness.run({ checkOnly: true, withProxy: true })).toBe(1);
+
+    const problem = harness.linesStartingWith("missing").join("\n");
+    expect(problem).toContain("permission denied");
+    expect(problem).toContain("usermod -aG docker");
+    expect(problem).not.toContain("is not running");
+  });
+
+  // Catches an old Bun passing as fine: a teammate was on 1.3.13 while the package asks for 1.4.2.
+  test.each([
+    ["1.3.13", true],
+    ["1.4.1", true],
+    ["1.4.2", false],
+    // A string comparison would call "1.10.0" older than "1.4.2".
+    ["1.10.0", false],
+    ["2.0.0", false],
+  ])("bun %s is warned about: %p", async (bunVersion, expectWarning) => {
+    const harness = createHarness({ bunVersion });
+
+    expect(await harness.run()).toBe(0);
+
+    const warnings = harness.linesStartingWith("warning").join("\n");
+    if (expectWarning) {
+      expect(warnings).toContain(`bun ${bunVersion} is older than ${MINIMUM_BUN_VERSION}`);
+      expect(warnings).toContain("bun upgrade");
+    } else {
+      expect(warnings).toBe("");
+    }
+  });
+
+  // Catches the warning naming a floor that package.json no longer asks for.
+  test("the Bun floor setup warns about is the engines.bun in package.json", () => {
+    const packageJson = JSON.parse(
+      readFileSync(join(import.meta.dir, "..", "..", "package.json"), "utf8"),
+    ) as unknown;
+    const enginesBun = z.object({ engines: z.object({ bun: z.string() }) }).parse(packageJson)
+      .engines.bun;
+
+    expect(enginesBun).toBe(`>=${MINIMUM_BUN_VERSION}`);
   });
 
   // Catches setup warning about a docker-agent version that CI does not actually pin: the two

@@ -34,7 +34,7 @@ Needs [Bun](https://bun.sh) 1.4.2 or newer, Docker with the `docker agent` plugi
 
 | Command | Does |
 |---|---|
-| `j5 setup` | Checks `bun`, `git`, `gh` (and that it is logged in), `docker`, the docker-agent plugin and its version; installs or refreshes the skills. Exit 1 only when a required tool is missing; a warning (gh not logged in, untested docker-agent version, stopped daemon) exits 0 |
+| `j5 setup` | Checks `bun` (warns below 1.4.2), `git`, `gh` (and that it is logged in), `docker` (and whether this user can reach the daemon), the docker-agent plugin and its version; installs or refreshes the skills. Exit 1 only when a required tool is missing; a warning (old bun, gh not logged in, untested docker-agent version, Docker not reachable) exits 0 unless `--proxy` was asked for, which needs Docker |
 | `j5 setup --check` | The same checks, **changes nothing**; reports skills as `missing` or `stale` |
 | `j5 setup --proxy` | Also: creates `PI_PROXY_AUTH_TOKEN` in `~/.config/cagent/.env` if it has none (owner-only, never printed, never replaced), runs `docker compose up -d --wait` on the package's own `containers/pi-openai-proxy/compose.yaml`, then asks the proxy how many models it serves |
 | `j5 setup --login` | Implies `--proxy`. When the proxy has no models yet, opens Pi in the proxy container so you can `/login` with **your own** Claude account, then re-checks |
@@ -42,6 +42,8 @@ Needs [Bun](https://bun.sh) 1.4.2 or newer, Docker with the `docker agent` plugi
 A skill directory that number-5 did not create (no marker file) is never replaced. A token already in your shell environment or in the env file is used as is.
 
 `--proxy` restarts the proxy if its image or settings changed, which interrupts a run in progress. Do it between runs.
+
+**`permission denied … /var/run/docker.sock`** is not a stopped daemon: Docker is running and this user is not allowed to use it. On Linux, `sudo usermod -aG docker $USER`, then log out and back in (or `newgrp docker` in that terminal), and check with `docker ps`. Members of the `docker` group have root-equivalent access to the machine, so add only users who should have it. A real stopped daemon says `the Docker daemon is not running or cannot be reached` instead.
 
 ## Releasing (maintainers)
 
