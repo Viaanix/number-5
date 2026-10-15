@@ -1,0 +1,73 @@
+# Publishes @viaanix/number-5 to GitHub Packages (npm.pkg.github.com) when a version tag is pushed:
+#   git tag v0.2.0 && git push origin v0.2.0
+# The tag must equal the version in package.json, and the commit must already have passed the
+# `check` workflow on all three systems, so a release is never the first time a commit is tested.
+# Access follows this repository's permissions (package.json "repository" links the package to it);
+# see README.md, "Install".
+name: publish-package
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  BUN_VERSION: "1.4.2"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: The tag must match package.json
+        run: |
+          version=$(bun -e 'console.log(JSON.parse(await Bun.file("package.json").text()).version)')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version. Bump package.json, merge it, and tag that commit."
+            exit 1
+          fi
+          echo "Releasing $version"
+
+      - name: This commit must have passed the check workflow everywhere
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "linux" or .name == "macos" or .name == "windows") | select(.conclusion == "success")] | map(.name) | unique | length')
+          if [ "$passed" != "3" ]; then
+            echo "::error::$GITHUB_SHA has $passed of 3 passing check jobs (linux, macos, windows). Wait for them, or fix them, then re-run this workflow."
+            exit 1
+          fi
+
+      # Scripts are skipped on purpose: `prepare` sets up git hooks (vp config), which needs the
+      # dev dependencies and means nothing for a published tarball.
+      - run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Show what will be published
+        run: bun pm pack --ignore-scripts --dry-run
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Written next to package.json, where bun reads it; the runner and this file are discarded.
+          # bun publish needs the `registry=` line as well as the token line: with only the token it
+          # fails with "missing authentication" (checked against a local registry, bun 1.4.2).
+          {
+            printf 'registry=https://npm.pkg.github.com/\n'
+            printf '//npm.pkg.github.com/:_authToken=%s\n' "$NODE_AUTH_TOKEN"
+          } > .npmrc
+          bun publish --ignore-scripts

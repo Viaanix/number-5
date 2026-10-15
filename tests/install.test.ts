@@ -19,12 +19,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { quoteForPosixShell } from "#launcher/shell-quote.ts";
+import { INSTALLED_SKILL_MARKER_FILE } from "#launcher/skills.ts";
 
 import {
   BLOCK_BEGIN_MARKER,
   BLOCK_END_MARKER,
   buildBlockBody,
-  INSTALLED_SKILL_MARKER_FILE,
   chooseProfilePath,
   chooseShell,
   type InstallerEnvironment,

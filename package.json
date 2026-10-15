@@ -1,10 +1,29 @@
 {
-  "name": "number-5",
-  "private": true,
+  "name": "@viaanix/number-5",
+  "version": "0.1.0",
+  "description": "Agentic workflows built on docker-agent, and j5, the launcher that runs them against any project checkout",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Viaanix/number-5.git"
+  },
+  "bin": {
+    "j5": "launcher/src/cli.ts"
+  },
+  "files": [
+    "launcher/src",
+    "workflows",
+    "!workflows/**/test",
+    "skills",
+    "containers/pi-openai-proxy"
+  ],
   "type": "module",
   "imports": {
     "#launcher/*": "./launcher/src/*",
     "#launcher-test/*": "./launcher/test/*"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -30,5 +49,8 @@
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@1.2.0"
+  },
+  "engines": {
+    "bun": ">=1.4.2"
   }
 }

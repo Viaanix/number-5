@@ -2,7 +2,8 @@
 //
 //   j5 [<team> [<entrypoint>]] [--project PATH] [--base REF] [--effort FLAVOR]
 //       [--queue N,N,... | --queue-label LABEL] [--max-rounds N|none]
-//       [--<parameter> VALUE]... [--print] [--help] [-- <docker agent run flags>...]
+//       [--<parameter> VALUE]... [--print] [--help] [--version] [-- <docker agent run flags>...]
+//   j5 setup [--check] [--proxy] [--login]
 //
 // Hand-rolled instead of node:util parseArgs because the accepted `--<parameter>`
 // flags come from the chosen team's manifest, which is only known after the
@@ -19,8 +20,15 @@ export const LAUNCHER_VALUE_OPTION_NAMES = [
   "max-rounds",
 ] as const;
 
-/** Launcher options that take no value. */
-export const LAUNCHER_SWITCH_NAMES = ["print", "help"] as const;
+/** Launcher options that take no value. The last three belong to `j5 setup`. */
+export const LAUNCHER_SWITCH_NAMES = [
+  "print",
+  "help",
+  "version",
+  "check",
+  "proxy",
+  "login",
+] as const;
 
 type LauncherSwitchName = (typeof LAUNCHER_SWITCH_NAMES)[number];
 
