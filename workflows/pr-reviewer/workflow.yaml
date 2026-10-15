@@ -1,0 +1,17 @@
+name: pr-reviewer
+description: Native PR review through the local pi provider; returns a report and posts it as one PR comment
+team: team.yaml
+path: [bin]
+
+entrypoints:
+  review:
+    description: Review an existing PR in its verified, clean worktree without edits, then post the report as a PR comment
+    agent: reviewer
+    parameters:
+      pr: { type: integer, label: Pull request number }
+    worktree:
+      mode: pr
+      pull_request_parameter: pr
+      detached: true
+    message: |
+      Review PR #{pr} in the current repository and follow your reviewer instructions, including publishing the finished report with pr_comment.

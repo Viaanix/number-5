@@ -1,4 +1,4 @@
-// End-to-end tests of `j5` against the real issue-team manifest in this repository.
+// End-to-end tests of `j5` against the real workflow manifests in this repository.
 // stdin is a pipe, so the launcher never prompts: every missing value is an error.
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
@@ -449,6 +449,75 @@ describe("j5 launching", () => {
     const rerun = runCli(launchArguments, createTemporaryDirectory(), launchEnvironmentPath);
     expect(rerun.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
     expect(JSON.parse(rerun.standardOutput.trim())).toEqual(expectedDockerCall);
+  });
+});
+
+describe("j5 detached PR reviews", () => {
+  let launchEnvironmentPath: string;
+
+  beforeAll(() => {
+    const fakeBinDirectory = createTemporaryDirectory();
+    writeFakeExecutable(
+      fakeBinDirectory,
+      "docker",
+      join(import.meta.dir, "fixtures", "fake-docker.ts"),
+    );
+    launchEnvironmentPath = `${fakeBinDirectory}${delimiter}${readPathValue(process.env)}`;
+  });
+
+  test("reviews the fetched PR head without moving an occupied, stale local branch or its dirty files", async () => {
+    const { projectRoot } = createFixtureProject("occupied-review-app");
+    const branchName = addPullRequestToOrigin(projectRoot, 7);
+    const pullRequestHead = runGit(projectRoot, ["rev-parse", `origin/${branchName}`]);
+    runGit(projectRoot, ["checkout", "--quiet", "-b", branchName, `origin/${branchName}`]);
+    runGit(projectRoot, ["reset", "--quiet", "--hard", FIXTURE_DEFAULT_BRANCH]);
+    const sourceHead = runGit(projectRoot, ["rev-parse", "HEAD"]);
+    const localNotesPath = join(projectRoot, "local-notes.txt");
+    await Bun.write(localNotesPath, "local work must survive\n");
+    const sourceStatus = runGit(projectRoot, ["status", "--porcelain"]);
+
+    const result = runCli(
+      ["pr-reviewer", "review", "--pr", "7"],
+      projectRoot,
+      launchEnvironmentPath,
+    );
+    const reviewWorktree = expectedWorktreePath(projectRoot, "occupied-review-app-pr-7-detached");
+
+    expect(result.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
+    expect(runGit(reviewWorktree, ["rev-parse", "HEAD"])).toBe(pullRequestHead);
+    expect(runGit(reviewWorktree, ["branch", "--show-current"])).toBe("");
+    expect(runGit(projectRoot, ["branch", "--show-current"])).toBe(branchName);
+    expect(runGit(projectRoot, ["rev-parse", "HEAD"])).toBe(sourceHead);
+    expect(runGit(projectRoot, ["status", "--porcelain"])).toBe(sourceStatus);
+    expect(readFileSync(localNotesPath, "utf8")).toBe("local work must survive\n");
+  });
+
+  test("keeps detached reviews separate from editable PR follow-up worktrees", () => {
+    const { projectRoot } = createFixtureProject("separate-review-app");
+    const branchName = addPullRequestToOrigin(projectRoot, 9);
+    const pullRequestHead = runGit(projectRoot, ["rev-parse", `origin/${branchName}`]);
+    const review = runCli(
+      ["pr-reviewer", "review", "--pr", "9"],
+      projectRoot,
+      launchEnvironmentPath,
+    );
+    const followup = runCli(
+      ["issue-team", "pr-followup", "--pr", "9"],
+      projectRoot,
+      launchEnvironmentPath,
+    );
+    const reviewWorktree = expectedWorktreePath(projectRoot, "separate-review-app-pr-9-detached");
+    const editableWorktree = expectedWorktreePath(projectRoot, "separate-review-app-pr-9");
+
+    expect(review.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
+    expect(followup.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
+    expect(runGit(reviewWorktree, ["rev-parse", "HEAD"])).toBe(pullRequestHead);
+    expect(runGit(reviewWorktree, ["branch", "--show-current"])).toBe("");
+    expect(runGit(editableWorktree, ["branch", "--show-current"])).toBe(branchName);
+    expect(runGit(editableWorktree, ["rev-parse", "--abbrev-ref", "@{upstream}"])).toBe(
+      `origin/${branchName}`,
+    );
+    expect(runGit(projectRoot, ["branch", "--show-current"])).toBe(FIXTURE_DEFAULT_BRANCH);
   });
 });
 

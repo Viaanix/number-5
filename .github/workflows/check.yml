@@ -35,9 +35,11 @@ jobs:
           chmod +x "$HOME/.docker/cli-plugins/docker-agent"
           docker agent version
       - run: bun install --frozen-lockfile
-      # No ANTHROPIC_API_KEY: every team is Claude Code harness agents, whose dry runs
-      # need neither a key nor the claude CLI (docs/docker-agent/gotchas.md).
+      # Native proxy agents need a non-empty local bearer token to initialize.
+      # validate:teams uses --dry-run; this value never authenticates a model call.
       - run: bun run check
+        env:
+          PI_PROXY_AUTH_TOKEN: validation-only-no-model-calls
 
   macos:
     runs-on: macos-latest
