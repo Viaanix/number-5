@@ -2,9 +2,9 @@
 
 One command to start any team in this repository against any project checkout. It picks the team, entry point, project, base branch, effort and parameters — from flags, or by asking — and runs `docker agent run` with the team's helper scripts on `PATH`.
 
-Source: `launcher/src/` (start at `cli.ts`). Entry points: `bin/j5` (Linux, macOS), `bin/j5.cmd` (Windows). Install: `scripts/install.ts`.
+Source: `launcher/src/` (start at `cli.ts`). Entry points: `bin/j5` (Linux, macOS), `bin/j5.cmd` (Windows), and the `j5` command Bun creates when number-5 is installed as a package ([packaging.md](packaging.md)). Install from a clone: `scripts/install.ts`.
 
-## Install
+## Install from a clone
 
 ```bash
 bun scripts/install.ts                 # link + j5 in your shell's startup file + bun install if needed
@@ -28,6 +28,8 @@ The command goes through the link, so moving the clone only needs a re-run of th
 ```bash
 j5                                         # pick everything interactively
 j5 list                                    # teams, entry points, parameters, efforts
+j5 setup                                   # check this machine, install the skills ([packaging.md](packaging.md#what-j5-setup-does))
+j5 --version                               # the installed version
 j5 issue-team work-issue --issue 123       # from inside the project checkout
 j5 issue-team work-issue --issue 123 --project ~/code/app --effort low
 j5 issue-team work-issue --issue 123 --base origin/release-2
@@ -120,7 +122,7 @@ Existing worktrees are still reused as-is, with no automatic refresh/reset.
 
 A `new` worktree whose branch `worktree-<name>` already exists without the directory (e.g. the directory was deleted, or an older docker-agent worktree elsewhere holds it) stops at `git worktree add`; delete the branch or remove that worktree first.
 
-**Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `effort`, `queue`, `queue-label`, `max-rounds`, `print`, `help`.
+**Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `effort`, `queue`, `queue-label`, `max-rounds`, `print`, `help`, `version`, `check`, `proxy`, `login`.
 
 **Queue block.** An entry point can also run over a queue:
 

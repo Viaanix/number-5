@@ -14,11 +14,9 @@
 //                               [--profile FILE] [--dry-run] [--uninstall]
 
 import {
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -31,6 +29,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { quoteForPosixShell, quoteForPowerShell } from "#launcher/shell-quote.ts";
+import {
+  copySkill,
+  INSTALLED_SKILL_MARKER_FILE,
+  listSkillPlacements,
+  wasInstalledByNumber5,
+} from "#launcher/skills.ts";
 
 /** Marker lines around the installed block. Unchanged from the bash installer, so
  * blocks it wrote are found and replaced. */
@@ -43,12 +47,6 @@ const DEFAULT_ALIAS_NAME = "j5";
 const ALIAS_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const LAUNCHER_ENTRY_RELATIVE_PATH = join("launcher", "src", "cli.ts");
 const SUPPORTED_SHELLS = ["bash", "zsh", "powershell"] as const;
-
-// Where docker-agent looks for skills in the home directory (pkg/skills/local.go).
-const INSTALLED_SKILLS_RELATIVE_DIRECTORY = join(".agents", "skills");
-const SKILLS_SOURCE_DIRECTORY_NAME = "skills";
-/** Written into each skill copy; only directories holding it are replaced or removed. */
-export const INSTALLED_SKILL_MARKER_FILE = ".installed-by-number-5";
 
 /** A shell whose startup file the installer knows how to write. */
 export type SupportedShell = (typeof SUPPORTED_SHELLS)[number];
@@ -201,37 +199,6 @@ function createLink(linkPath: string, repositoryRoot: string, platform: NodeJS.P
   symlinkSync(repositoryRoot, linkPath, platform === "win32" ? "junction" : "dir");
 }
 
-/** A skill shipped in this repository and where it is installed. */
-type SkillPlacement = { skillName: string; sourcePath: string; installedPath: string };
-
-function listSkillPlacements(repositoryRoot: string, homeDirectory: string): SkillPlacement[] {
-  const skillsSourceDirectory = join(repositoryRoot, SKILLS_SOURCE_DIRECTORY_NAME);
-  if (!existsSync(skillsSourceDirectory)) {
-    return [];
-  }
-  return readdirSync(skillsSourceDirectory, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => ({
-      skillName: entry.name,
-      sourcePath: join(skillsSourceDirectory, entry.name),
-      installedPath: join(homeDirectory, INSTALLED_SKILLS_RELATIVE_DIRECTORY, entry.name),
-    }))
-    .toSorted((left, right) => left.skillName.localeCompare(right.skillName));
-}
-
-function wasInstalledByThisInstaller(installedPath: string): boolean {
-  return existsSync(join(installedPath, INSTALLED_SKILL_MARKER_FILE));
-}
-
-function copySkill(placement: SkillPlacement): void {
-  rmSync(placement.installedPath, { recursive: true, force: true });
-  cpSync(placement.sourcePath, placement.installedPath, { recursive: true });
-  writeFileSync(
-    join(placement.installedPath, INSTALLED_SKILL_MARKER_FILE),
-    `Copied from ${placement.sourcePath} by number-5 scripts/install.ts.\nRe-run the installer to refresh; edits here are overwritten.\n`,
-  );
-}
-
 /**
  * Runs the installer and returns the report lines it would print.
  * @throws InstallerError for bad options or a path it refuses to replace.
@@ -277,7 +244,7 @@ export function runInstaller(
       report.push(`left ${linkPath} alone: it is not a link to ${repositoryRoot}`);
     }
     for (const placement of listSkillPlacements(repositoryRoot, environment.homeDirectory)) {
-      if (wasInstalledByThisInstaller(placement.installedPath)) {
+      if (wasInstalledByNumber5(placement.installedPath)) {
         change(`remove skill ${placement.skillName} from ${placement.installedPath}`, () => {
           rmSync(placement.installedPath, { recursive: true, force: true });
         });
@@ -320,7 +287,7 @@ export function runInstaller(
       change(`install skill ${placement.skillName} to ${placement.installedPath}`, () => {
         copySkill(placement);
       });
-    } else if (wasInstalledByThisInstaller(placement.installedPath)) {
+    } else if (wasInstalledByNumber5(placement.installedPath)) {
       change(`refresh skill ${placement.skillName} in ${placement.installedPath}`, () => {
         copySkill(placement);
       });

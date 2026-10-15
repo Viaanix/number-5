@@ -14,7 +14,19 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 ## Quick start
 
-Prerequisites: Docker with the `docker agent` plugin (v1.145.0) and [Bun](https://bun.sh). issue-team and test-quality use `claude` logged in to a Claude subscription. pr-reviewer uses the logged-in [proxy container](containers/pi-openai-proxy/README.md) and its local `PI_PROXY_AUTH_TOKEN`, not an Anthropic API key. issue-team and pr-reviewer also need `gh` logged in; see each team's README.
+Prerequisites: Docker with the `docker agent` plugin (v1.145.0), [Bun](https://bun.sh), `git` and `gh`. issue-team and pr-reviewer use the logged-in [proxy container](containers/pi-openai-proxy/README.md) and its local `PI_PROXY_AUTH_TOKEN`, not an Anthropic API key; test-quality uses `claude` logged in to a Claude subscription. `j5 setup` checks all of this.
+
+**Install the package** (teammates; needs a one-time registry token, see [docs/packaging.md](docs/packaging.md#install-teammates)):
+
+```bash
+bun add -g @viaanix/number-5
+j5 setup                    # checks your tools, installs the skills
+j5 setup --proxy --login    # optional: start the local proxy and log it in
+j5 list
+cd ~/code/some-repo && j5 issue-team work-issue --issue 123
+```
+
+**From a clone** (changing number-5 itself):
 
 ```bash
 bun scripts/install.ts      # link ~/number-5, add `j5` to your shell, install skills, bun install
@@ -27,6 +39,7 @@ j5                         # or pick everything interactively
 ## Docs
 
 - [docs/launcher.md](docs/launcher.md) — `j5` options and the `workflow.yaml` manifest
+- [docs/packaging.md](docs/packaging.md) — installing number-5 as a package, `j5 setup`, releasing
 - [docs/new-team.md](docs/new-team.md) — adding a team or experiment
 - [docs/docker-agent/](docs/README.md) — reference, patterns and gotchas
 - [containers/pi-openai-proxy/](containers/pi-openai-proxy/README.md) — pinned subscription-backed model endpoint for native Docker Agent agents

@@ -7,6 +7,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "
 import { delimiter, dirname, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
+import { z } from "zod";
+
 import { LAUNCHER_SWITCH_NAMES, LAUNCHER_VALUE_OPTION_NAMES } from "../src/arguments.ts";
 import { formatBanner } from "../src/banner.ts";
 import { formatUsage } from "../src/cli.ts";
@@ -101,13 +103,16 @@ function runCli(
   cliArguments: string[],
   workingDirectory: string,
   pathValue: string = readPathValue(process.env),
+  extraEnvironment: Record<string, string> = {},
 ): CliResult {
-  const completedProcess = Bun.spawnSync(["bun", CLI_PATH, ...cliArguments], {
+  // The Bun that is running this test, not whatever `bun` is on PATH: some tests give the launcher
+  // a PATH with no tools in it, and it must still start.
+  const completedProcess = Bun.spawnSync([process.execPath, CLI_PATH, ...cliArguments], {
     cwd: workingDirectory,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: withPathValue(process.env, pathValue),
+    env: { ...withPathValue(process.env, pathValue), ...extraEnvironment },
   });
   return {
     exitCode: completedProcess.exitCode,
@@ -673,5 +678,61 @@ describe("j5 list and help", () => {
     for (const optionName of [...LAUNCHER_VALUE_OPTION_NAMES, ...LAUNCHER_SWITCH_NAMES]) {
       expect(usage).toContain(`--${optionName}`);
     }
+  });
+});
+
+describe("j5 --version and j5 setup", () => {
+  test("--version prints the package name and version from package.json", () => {
+    const packageJson = z
+      .object({ name: z.string(), version: z.string() })
+      .parse(
+        JSON.parse(readFileSync(resolve(import.meta.dir, "..", "..", "package.json"), "utf8")),
+      );
+
+    const result = runCli(["--version"], createTemporaryDirectory());
+
+    expect(result).toEqual({
+      exitCode: 0,
+      standardOutput: `${packageJson.name} ${packageJson.version}`,
+      standardError: "",
+    });
+  });
+
+  // The real process, with a PATH that holds no tools and a home directory of its own: setup
+  // must report each missing tool, exit non-zero, and in --check mode leave the home untouched.
+  test("setup --check on a machine without the tools lists them as missing and changes nothing", () => {
+    const emptyToolDirectory = createTemporaryDirectory();
+    const homeDirectory = createTemporaryDirectory();
+
+    const result = runCli(["setup", "--check"], createTemporaryDirectory(), emptyToolDirectory, {
+      HOME: homeDirectory,
+      USERPROFILE: homeDirectory,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.standardOutput).toContain("missing  git is not installed");
+    expect(result.standardOutput).toContain("missing  gh is not installed");
+    expect(result.standardOutput).toContain("missing  docker is not installed");
+    expect(result.standardOutput).toContain("setup found problems above");
+    expect(existsSync(join(homeDirectory, ".agents"))).toBe(false);
+  });
+
+  // Catches a setup-only flag silently doing nothing on a team launch, or setup quietly
+  // ignoring a flag that does not belong to it.
+  test.each([
+    [["setup", "--print"], "--print does not apply to j5 setup"],
+    [
+      ["setup", "--check", "--login"],
+      "--login changes things, so it cannot be combined with --check",
+    ],
+    [["setup", "extra"], "j5 setup takes only --check, --proxy and --login"],
+    [["setup", "--project", "/tmp"], "j5 setup takes only --check, --proxy and --login"],
+    [["issue-team", "work-issue", "--issue", "1", "--proxy"], "--proxy only applies to 'j5 setup'"],
+    [["issue-team", "work-issue", "--issue", "1", "--check"], "--check only applies to 'j5 setup'"],
+  ])("j5 %p is a usage error (exit 2)", (cliArguments, expectedMessage) => {
+    const result = runCli(cliArguments, createTemporaryDirectory());
+
+    expect(result.exitCode).toBe(2);
+    expect(result.standardError).toContain(expectedMessage);
   });
 });

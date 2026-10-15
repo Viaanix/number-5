@@ -60,7 +60,10 @@ proxy starts with no authentication at all and serves whatever login is in the v
 
 ## Build and log in
 
-From the repository root:
+With number-5 installed, **`j5 setup --proxy --login` does everything in this section**: it creates the
+token if you have none, starts the proxy and opens Pi so you can log in
+([docs/packaging.md](../../docs/packaging.md#what-j5-setup-does)). The manual steps are below, from the
+repository root:
 
 ```bash
 cd containers/pi-openai-proxy
@@ -217,27 +220,43 @@ tag is already published from the same inputs it skips quietly, for example afte
 edit that is not a bump. If the inputs differ it fails and tells you to bump, because a machine
 that already pulled the old image under that tag would otherwise keep running it with no warning.
 
-**First publish: check who can read it.** GitHub Packages links the package to this repository
-and, by default, gives it the repository's access permissions. This repository is public, and I
-have not verified what that means for a private package. After the first publish, open
-*Package settings* on the new package and make sure:
+**Who can read the package.** The package is linked to this repository (the workflow's source label
+does it) and **inherits the repository's access**. Observed on 2026-10-15, after the first publish
+of `4.9.5-1`:
 
-- visibility is **Private**, and "Inherit access from repository" is off or you have confirmed
-  it keeps the package private;
-- the Viaanix team that should use it has the **Read** role;
-- an anonymous pull fails. This returns 401 (or 404) if it is private and 200 if it is public:
+- The package is **Private**, although the repository is public. Its page returns 404 to an
+  anonymous visitor and the registry refuses an anonymous pull, so a public repository does not
+  make a linked package public.
+- The Viaanix base permission is `none`, and `number-5` had only one direct collaborator, so the
+  package's *Inherited access* list showed one person. Nobody else could pull it.
 
-  ```bash
-  token=$(curl -s "https://ghcr.io/token?scope=repository:viaanix/j5-pi-openai-proxy:pull" | jq -r .token)
-  curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $token" \
-    -H "Accept: application/vnd.oci.image.index.v1+json" \
-    https://ghcr.io/v2/viaanix/j5-pi-openai-proxy/manifests/<tag>
-  ```
+So to give people access, grant it **on the repository**, not on the package: *Repository
+Settings → Collaborators and teams → Add teams*, pick the team, role **Read**. Read is enough to
+pull; do not use Write, which also lets them push to the repository. Publishing needs no team
+access: CI publishes through the repository's own Actions access. The package's *Package settings*
+page should then list that team's members under *Inherited access*; check that it matches who you
+meant. Keep *Inherit access from source repository* on unless the package's readers should differ
+from the repository's.
 
-As far as I found, GitHub has no REST endpoint for changing a package's visibility or access,
-so those are settings-page steps. I also have not confirmed that fine-grained tokens cannot pull
-from `ghcr.io`; the instructions above say "classic" because that is what the documentation
-describes for the Container registry.
+Read-only checks anyone can run:
+
+```bash
+# Anonymous pull must fail: no token is issued and the manifest is refused (403), the same as for a
+# package that does not exist. A public package would answer 200.
+token=$(curl -s "https://ghcr.io/token?scope=repository:viaanix/j5-pi-openai-proxy:pull" | jq -r .token)
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $token" \
+  -H "Accept: application/vnd.oci.image.index.v1+json" \
+  https://ghcr.io/v2/viaanix/j5-pi-openai-proxy/manifests/<tag>
+```
+
+The package page is `https://github.com/Viaanix/number-5/pkgs/container/j5-pi-openai-proxy`, and its
+settings are under the org: `https://github.com/orgs/Viaanix/packages/container/j5-pi-openai-proxy/settings`.
+
+Not verified: that fine-grained tokens cannot pull from `ghcr.io` (the instructions say "classic"
+because that is what the Container registry documentation describes), and that a team member can
+pull after being given Read. Have the first teammate try it and record the result here. As far as I
+found, GitHub has no REST endpoint for a package's visibility or access, so changing them is a
+settings-page step.
 
 **Never publish a login.** The image is built from `package.json`, `bun.lock` and
 `patch-usage.ts` only (`.dockerignore` excludes everything else). Do not add `COPY` lines for

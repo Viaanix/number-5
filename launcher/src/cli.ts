@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 // `j5` — the universal launcher for the docker-agent teams in this repository.
 // It picks a team and entry point, a project checkout, a base branch, an effort
 // (a docker-agent flavor) and the entry point's parameters, from flags or by asking,
@@ -11,6 +12,7 @@
 // `--queue-label <label>`): once per value, one after another, unattended. run.ts
 // executes it; queue.ts reads each item's outcome.
 
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
@@ -27,6 +29,7 @@ import {
   resolvePullRequestBranch,
 } from "./git.ts";
 import type { EntryPointDefinition, WorkflowManifest } from "./manifest.ts";
+import { readPackageInfo } from "./package-info.ts";
 import { describeInvalidEffort, describeInvalidParameterValue } from "./parameters.ts";
 import {
   buildLaunchPlan,
@@ -51,11 +54,14 @@ import {
   type RoundLimit,
 } from "./queue.ts";
 import { runPlan, runQueue } from "./run.ts";
+import { createSetupEnvironment, runSetup } from "./setup.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
 import { discoverTeams, resolveTeamsDirectory } from "./teams.ts";
 
-// This file lives at <repository>/launcher/src/cli.ts; teams live under <repository>/workflows/.
+// This file lives at <root>/launcher/src/cli.ts; teams live under <root>/workflows/. <root> is the
+// clone when run from a checkout and the installed package directory otherwise, which is why only
+// paths relative to this file are used to find teams, skills and the proxy files.
 const LAUNCHER_REPOSITORY_ROOT = resolve(import.meta.dir, "..", "..");
 
 const EXIT_CODE_SUCCESS = 0;
@@ -65,6 +71,9 @@ const EXIT_CODE_USAGE = 2;
 const EXIT_CODE_CANCELLED = 130;
 
 const LIST_COMMAND = "list";
+const SETUP_COMMAND = "setup";
+// Switches that only mean something to `j5 setup`; anywhere else they are a usage error.
+const SETUP_ONLY_SWITCH_NAMES = ["check", "proxy", "login"] as const;
 
 // Value of the effort choice that passes no --flavor. Empty because a flavor name never is.
 const TEAM_DEFAULT_EFFORT_CHOICE = "";
@@ -116,6 +125,7 @@ function formatUsage(): string {
     "Usage:",
     "  j5                                    pick everything interactively",
     `  j5 ${LIST_COMMAND}                               teams, entry points, parameters, efforts`,
+    `  j5 ${SETUP_COMMAND} [--check] [--proxy] [--login]     check this machine, install the skills, optionally start the proxy`,
     "  j5 <team> [<entrypoint>] [options] [--<parameter> <value>]... [-- <docker agent run flags>]",
     "",
     "Options:",
@@ -126,7 +136,13 @@ function formatUsage(): string {
     "  --queue-label <l>  the same, over every open issue with this label (needs gh access to the repo)",
     "  --max-rounds <n>   fix rounds per queue item, or 'none' for no limit (default 5)",
     "  --print            print the command instead of running it",
+    "  --version          the installed version",
     "  --help, -h         this help",
+    "",
+    "Setup options (j5 setup only):",
+    "  --check            report what is missing or out of date; change nothing",
+    "  --proxy            also create the proxy token if needed and start the proxy (Docker)",
+    "  --login            also open Pi to log the proxy in to your own Claude account (implies --proxy)",
     "",
     "Examples:",
     "  j5 issue-team work-issue --issue 123 --effort low",
@@ -647,12 +663,56 @@ async function launch(
   return runPlan(plan);
 }
 
+/** `j5 setup`: validates the arguments, then checks the machine and installs what j5 needs. */
+async function setUp(parsedArguments: ParsedArguments): Promise<number> {
+  const hasOtherArguments =
+    parsedArguments.positionals.length > 1 ||
+    parsedArguments.optionValues.size > 0 ||
+    parsedArguments.passthroughArguments.length > 0;
+  if (hasOtherArguments) {
+    throw new UsageError(`j5 ${SETUP_COMMAND} takes only --check, --proxy and --login`);
+  }
+  if (parsedArguments.switches.has("print")) {
+    throw new UsageError(
+      `--print does not apply to j5 ${SETUP_COMMAND}; use --check to report without changing anything`,
+    );
+  }
+  const withLogin = parsedArguments.switches.has("login");
+  const checkOnly = parsedArguments.switches.has("check");
+  if (checkOnly && withLogin) {
+    throw new UsageError("--login changes things, so it cannot be combined with --check");
+  }
+  const packageInfo = readPackageInfo(LAUNCHER_REPOSITORY_ROOT);
+  console.log(`${packageInfo.name} ${packageInfo.version} (${LAUNCHER_REPOSITORY_ROOT})`);
+  return runSetup(
+    { checkOnly, withProxy: withLogin || parsedArguments.switches.has("proxy"), withLogin },
+    createSetupEnvironment(LAUNCHER_REPOSITORY_ROOT, homedir()),
+    (line) => console.log(line),
+  );
+}
+
 async function main(commandLineArguments: string[]): Promise<number> {
   try {
     const parsedArguments = parseArguments(commandLineArguments);
     if (parsedArguments.switches.has("help")) {
       console.log(formatUsage());
       return EXIT_CODE_SUCCESS;
+    }
+    if (parsedArguments.switches.has("version")) {
+      const packageInfo = readPackageInfo(LAUNCHER_REPOSITORY_ROOT);
+      console.log(`${packageInfo.name} ${packageInfo.version}`);
+      return EXIT_CODE_SUCCESS;
+    }
+    if (parsedArguments.positionals[0] === SETUP_COMMAND) {
+      return await setUp(parsedArguments);
+    }
+    const misplacedSetupSwitches = SETUP_ONLY_SWITCH_NAMES.filter((switchName) =>
+      parsedArguments.switches.has(switchName),
+    );
+    if (misplacedSetupSwitches.length > 0) {
+      throw new UsageError(
+        `--${misplacedSetupSwitches.join(", --")} only applies to 'j5 ${SETUP_COMMAND}'`,
+      );
     }
     const teams = discoverTeams(LAUNCHER_REPOSITORY_ROOT);
     if (teams.length === 0) {
