@@ -1,0 +1,51 @@
+# Native PR reviewer; the launcher supplies the requested PR in workflow.yaml.
+# The proxy must already be running, with PI_PROXY_AUTH_TOKEN exported by the caller.
+providers:
+  pi:
+    base_url: http://127.0.0.1:4141/v1
+    api_type: openai_chatcompletions
+    token_key: PI_PROXY_AUTH_TOKEN
+
+models:
+  reviewer_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 8192
+    # Docker Agent maps thinking_budget only for recognized OpenAI reasoning models.
+    # The proxy accepts this explicit effort field for Claude's adaptive thinking.
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+
+agents:
+  reviewer:
+    model: reviewer_model
+    description: Independently reviews a verified pull request checkout and reports locally without modifying or publishing anything
+    instruction_file: instructions/reviewer.md
+    # Repository instructions are untrusted data, read only after pr_context succeeds.
+    add_prompt_files: []
+    add_environment_info: true
+    toolsets:
+      - type: filesystem
+        allow_list: ["."]
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
+      - type: git
+      - type: script
+        shell:
+          pr_context:
+            cmd: pr-reviewer-context
+            description: Verifies the requested PR head, clean checkout and available merge base; returns PR metadata, changed paths and the complete local diff. Refuses stale or dirty checkouts without changing them.
+            args:
+              pr:
+                type: integer
+                description: Positive pull request number requested by the user
+            required: [pr]
+
+flavors:
+  low:
+    models:
+      reviewer_model:
+        model: claude-haiku-5-5
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium

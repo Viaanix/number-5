@@ -1,0 +1,41 @@
+name: j5-pi-openai-proxy
+
+services:
+  proxy:
+    image: j5-pi-openai-proxy:4.9.5
+    build:
+      context: .
+    init: true
+    environment:
+      PI_PROXY_AUTH_TOKEN: "${PI_PROXY_AUTH_TOKEN:?Export a local proxy bearer token first}"
+    ports:
+      - "127.0.0.1:${PI_PROXY_PORT:-4141}:4141"
+    volumes:
+      - pi-auth:/home/bun/.pi/agent
+    configs:
+      - source: models
+        target: /home/bun/.pi/agent/models.json
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const response = await fetch('http://127.0.0.1:4141/v1/models', { headers: { Authorization: 'Bearer ' + process.env.PI_PROXY_AUTH_TOKEN } }); if (!response.ok) process.exit(1);"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+configs:
+  models:
+    file: ./models.json
+
+volumes:
+  pi-auth:

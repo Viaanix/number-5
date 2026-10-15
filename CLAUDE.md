@@ -6,7 +6,7 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 
 | Path | What |
 |---|---|
-| `workflows/<team>/` | One team per directory under `workflows/` (the launcher scans only there): `team.yaml` (docker-agent; Claude Code harness agents), `workflow.yaml` (launcher manifest; each entry agent's whole prompt is its `message`), `helpers/` + `bin/`, `roles/` (issue-team's sub-agent prompts). `workflows/issue-team/` is the reference team; `workflows/test-quality/` runs the `j5-test-quality` skill |
+| `workflows/<team>/` | One team per directory under `workflows/` (the launcher scans only there): `team.yaml` (native models/tools or Claude Code harness agents), `workflow.yaml` (launcher manifest), `helpers/` + `bin/`, optional `instructions/` and `roles/`. issue-team is the harness reference; pr-reviewer is the native proxy-backed reference; test-quality runs the `j5-test-quality` skill. Harness entry prompts live in manifest messages; native agents can use `instruction_file` |
 | `launcher/src/` | The `j5` CLI (Bun + TypeScript). `cli.ts` is the entry and gathers choices; `plan.ts` builds the git steps and docker-agent command and has no side effects; `run.ts` executes plans (single runs, and queue runs: one unattended run per item); `queue.ts` is the queue's pure logic (parsing, outcomes from the `RESULT:` line, summary). Also the code team helpers share (`team-helper.ts`, `change-diff.ts`, `test-prescreen.ts`), so no team imports another |
 | `launcher/test/` | bun:test tests; real temporary git repositories, no module mocks |
 | `skills/` | Agent skills shipped with the teams (`j5-test-quality`); the installer copies them to `~/.agents/skills/` |
@@ -14,6 +14,7 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 | `scripts/` | `install.ts` (link + shell alias/function, all OSes), `lint-shell.sh`, `validate-teams.ts` |
 | `tests/` | bun:test tests for `scripts/` |
 | `docs/` | docker-agent knowledge (reference, patterns, gotchas), launcher and new-team guides |
+| `containers/` | Pinned model/runtime containers. `pi-openai-proxy/` exposes subscription-backed model access for native agents and mounts the versioned current-model catalogue separately from its login volume |
 
 ## Verification
 
@@ -29,6 +30,8 @@ bun run validate:teams   # manifests, agents, configs, flavors, dry runs against
 ```
 
 `check` passing is necessary, not sufficient. For a launcher change, run the affected path: `bin/j5 <team> <entrypoint> … --print`, then `… -- --dry-run --exec` in a scratch repository. For a team change, `validate:teams` plus a real run on a throwaway repository.
+
+Native pr-reviewer validation needs a non-empty `PI_PROXY_AUTH_TOKEN`; use the running proxy's token for real runs. For model-free CI/dry-run validation only, `PI_PROXY_AUTH_TOKEN=validation-only-no-model-calls bun run check` needs no proxy or provider login. The tests also require `pwsh` on PATH for PowerShell quoting checks.
 
 ## Conventions
 

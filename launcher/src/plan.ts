@@ -38,7 +38,7 @@ export type WorktreeFacts = {
   state: WorktreeState;
   /**
    * For `pr` entry points whose worktree is absent: the PR's branch in origin, and
-   * whether the project already has a local branch of that name.
+   * whether a local branch exists (used only for an editable worktree).
    */
   pullRequestBranch: { name: string; existsLocally: boolean } | undefined;
 };
@@ -99,7 +99,7 @@ function findEntryPoint(manifest: WorkflowManifest, entryPointName: string): Ent
 
 /**
  * Returns where an entry point's worktree goes: a directory beside the project,
- * named from the manifest's template (`new`) or `<repo>-pr-<number>` (`pr`).
+ * named from the manifest's template (`new`) or `<repo>-pr-<number>[-detached]` (`pr`).
  * Undefined for `none` entry points, which run in the project itself.
  * @throws Error when the name is not one safe path segment, or would be the project itself.
  */
@@ -122,7 +122,8 @@ export function resolveWorktreeLocation(
     if (pullRequestNumber === undefined) {
       throw new Error(`entry point '${entryPointName}' needs a PR number`);
     }
-    worktreeName = `${repositoryName}-pr-${pullRequestNumber}`;
+    // Review snapshots must not be reused as editable PR follow-up worktrees.
+    worktreeName = `${repositoryName}-pr-${pullRequestNumber}${worktree.detached === true ? "-detached" : ""}`;
   } else {
     return undefined;
   }
@@ -181,6 +182,13 @@ function buildPreparationSteps(
     );
   }
   const fetchStep = [...gitInProject, "fetch", ORIGIN_REMOTE_NAME, pullRequestBranch.name];
+  if (entryPoint.worktree.mode === "pr" && entryPoint.worktree.detached === true) {
+    // Use the freshly fetched head, not a local branch that may be occupied or stale.
+    return [
+      fetchStep,
+      [...gitInProject, "worktree", "add", "--detach", location.path, "FETCH_HEAD"],
+    ];
+  }
   // A new local branch tracks the PR's branch, so `git pull --ff-only` and `git push`
   // inside the worktree update the PR. An existing local branch is used as it is.
   const addStep = pullRequestBranch.existsLocally

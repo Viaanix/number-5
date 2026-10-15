@@ -87,7 +87,65 @@ ANTHROPIC_API_KEY=placeholder docker agent run workflows/issue-team/team.yaml --
 
 **Consequence:** a dry run checks that the key is present, not that it is valid. CI needs a value even though no model is called.
 
-**Scope:** native model agents only. A config whose agents are all `harness: claude-code` dry-runs with no key, an empty `--config-dir`, and no `claude` on `PATH` (both teams here, 2026-10-14: `Dry run mode enabled…`, exit 0). CI therefore sets no key; a team that adds a native agent needs a placeholder `ANTHROPIC_API_KEY` in `.github/workflows/check.yml` again.
+**Scope:** native model agents only. A config whose agents are all `harness: claude-code` dry-runs with no key, an empty `--config-dir`, and no `claude` on `PATH` (issue-team and test-quality, 2026-10-14: `Dry run mode enabled…`, exit 0). CI now supplies a placeholder `PI_PROXY_AUTH_TOKEN` for native pr-reviewer initialization; it does not need `ANTHROPIC_API_KEY` or a running proxy for these dry runs.
+
+### Claude through an OpenAI-compatible proxy needs explicit reasoning fields
+
+**Observed:** Docker Agent v1.145.0, pi-openai-proxy 4.9.5, locked Pi adapter 0.73.1, 2026-10-15.
+
+**Receipt:** after adding Sonnet 5.5 through Pi's supported `models.json`, a native
+tool probe with `thinking_budget: high` failed before any tool call:
+
+```text
+model failed: ... 400 ... To turn thinking off on this model, send "thinking":
+{"type": "between_tools"} instead of {"type": "disabled"}.
+```
+
+Docker Agent's OpenAI client does not classify Claude as an OpenAI reasoning
+model, so that setting does not send the proxy's `reasoning_effort`. Using
+`provider_opts: { extra_body: { reasoning_effort: high } }` instead completed two
+real script-tool turns on `claude-sonnet-5-5`, exit 0. Haiku 5.5 with explicit
+`medium` effort passed the same probe. The configured model names were recorded
+in `agent_info`; the scripts generated values not present in the prompts and
+both values returned in the final responses.
+
+The full workflow command also passed:
+
+```bash
+bin/j5 pr-reviewer review --pr 12 --project <scratch> -- --exec --json --safety autonomous
+# agent_info: pi/claude-sonnet-5-5
+# pr_context -> native read-only file inspection -> pr_context
+# SHA-identifying local verdict; exit 0; worktree unchanged
+```
+
+**Consequence:** a new catalogue entry is not sufficient proof of request
+compatibility. Keep model-specific request settings explicit and verify the tool
+loop, not only model discovery. This receipt does not establish signed-history
+portability or thinking visibility through an OpenAI translator.
+
+### Read-only native filesystem tools can enforce a checkout boundary
+
+**Observed:** Docker Agent v1.145.0 on Linux, Haiku 5.5 through the proxy above,
+2026-10-15.
+
+**Receipt:** a temporary native team used `tools: [read_file]` and
+`allow_list: ["."]`. Running `docker agent run <team> --working-dir <allowed-root>
+--exec --json --safety autonomous ...` attempted both an actual external
+sentinel file and an actual symlink inside the root pointing to it:
+
+```text
+read_file(<external file>) -> isError: true, outside the allowed directories (.)
+read_file(<allowed-root>/outside-link) -> isError: true, outside the allowed directories (.)
+```
+
+Neither response returned the sentinel contents. `debug toolsets --json` for
+pr-reviewer separately listed only its configured read-only filesystem/git
+tools and `pr_context`, with no shell or write tools.
+
+**Consequence:** native tool restrictions remain active with autonomous tool
+approval. This is not an OS sandbox or a secret filter: files inside the
+allowed checkout are still readable, and prompt-injection resistance remains
+a separate concern.
 
 ### `doctor` reports a credential as found when it is only set
 
