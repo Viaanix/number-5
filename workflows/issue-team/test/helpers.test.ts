@@ -7,7 +7,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
-import { findPathVariableName, readPathValue } from "../../../launcher/src/environment.ts";
 import {
   createFixtureProject,
   createTemporaryDirectory,
@@ -19,7 +18,8 @@ import {
   runHelperScriptFile,
   runThroughDockerAgentShell,
   writeFakeCommand,
-} from "../../../launcher/test/fixtures.ts";
+} from "#launcher-test/fixtures.ts";
+import { findPathVariableName, readPathValue } from "#launcher/environment.ts";
 
 afterAll(removeTemporaryDirectories);
 

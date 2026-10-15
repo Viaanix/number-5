@@ -1,7 +1,8 @@
 // Posts the reviewer's finished report as one comment on the verified PR. This is the
 // reviewer's only GitHub write: a plain comment, never an approval or change request.
 
-import { runHelper } from "../../../launcher/src/team-helper.ts";
+import { runHelper } from "#launcher/team-helper.ts";
+
 import { requirePostableReport, stripLocalStatusLines } from "./report.ts";
 import { parsePullRequestNumber, readSnapshot, verifyCheckout } from "./snapshot.ts";
 

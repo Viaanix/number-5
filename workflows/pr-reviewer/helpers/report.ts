@@ -2,7 +2,8 @@
 // The report is model-written from untrusted PR content and the comment may be read by
 // everyone with access to the repository, so these checks run before anything is posted.
 
-import { HelperUsageError } from "../../../launcher/src/team-helper.ts";
+import { HelperUsageError } from "#launcher/team-helper.ts";
+
 import { OBJECT_ID } from "./snapshot.ts";
 
 /** Under GitHub's 65,536-character limit, and under Windows' per-variable environment limit. */

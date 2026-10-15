@@ -43,6 +43,7 @@ Native pr-reviewer validation needs a non-empty `PI_PROXY_AUTH_TOKEN`; use the r
 - Formatting: `vp fmt` covers TS/JS/JSON only. Markdown and YAML are excluded on purpose (`fmt.ignorePatterns`): agent prompts (`workflow.yaml` messages, `roles/*.md`) and `team.yaml` are hand-formatted model input.
 - Verbose names, no abbreviations; comments carry *why*. Named constants instead of magic values.
 - Tests: say what bug each test catches. No `mock.module`; inject paths and use real git repositories (`launcher/test/fixtures.ts`).
+- Imports from outside `launcher/` into it use the `package.json` `imports` aliases: `#launcher/<file>.ts` for `launcher/src/`, `#launcher-test/<file>.ts` for `launcher/test/`. Files inside `launcher/` import each other relatively. The `#` prefix, not `@`, keeps the formatter from sorting these among npm packages. An alias import is still code outside the team directory: a sandboxed run mounts only the team directory, so a helper that uses one cannot run there (#14).
 - Shell: `#!/usr/bin/env bash`, `set -euo pipefail`, shellcheck-clean at style level without inline disables.
 - A docker-agent behavior claim in `docs/` carries a receipt (command + output + version), or goes under "Unverified" in `docs/docker-agent/gotchas.md`. Something surprised you? Add it there.
 - Installed docker-agent: v1.145.0. After upgrading, re-run the receipts in `docs/docker-agent/gotchas.md`.

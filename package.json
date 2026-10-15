@@ -2,6 +2,10 @@
   "name": "number-5",
   "private": true,
   "type": "module",
+  "imports": {
+    "#launcher/*": "./launcher/src/*",
+    "#launcher-test/*": "./launcher/test/*"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "vp lint --deny-warnings",

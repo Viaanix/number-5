@@ -3,7 +3,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
-import { findPathVariableName, readPathValue } from "../../../launcher/src/environment.ts";
 import {
   createFixtureProject,
   createTemporaryDirectory,
@@ -12,7 +11,8 @@ import {
   runHelperScriptFile,
   writeFakeCommand,
   type HelperResult,
-} from "../../../launcher/test/fixtures.ts";
+} from "#launcher-test/fixtures.ts";
+import { findPathVariableName, readPathValue } from "#launcher/environment.ts";
 
 const TEAM_DIRECTORY = resolve(import.meta.dir, "..");
 const CONTEXT_HELPER_PATH = join(TEAM_DIRECTORY, "helpers", "context.ts");

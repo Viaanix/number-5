@@ -15,10 +15,10 @@
 import { delimiter, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
-import { readPathValue, withPathValue } from "../launcher/src/environment.ts";
-import type { WorkflowManifest } from "../launcher/src/manifest.ts";
-import { readTeamConfigSummary } from "../launcher/src/team-config.ts";
-import { discoverTeams, resolveTeamsDirectory } from "../launcher/src/teams.ts";
+import { readPathValue, withPathValue } from "#launcher/environment.ts";
+import type { WorkflowManifest } from "#launcher/manifest.ts";
+import { readTeamConfigSummary } from "#launcher/team-config.ts";
+import { discoverTeams, resolveTeamsDirectory } from "#launcher/teams.ts";
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, "..");
 const SUCCESS_EXIT_CODE = 0;

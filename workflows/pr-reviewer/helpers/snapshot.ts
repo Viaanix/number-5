@@ -7,11 +7,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import {
-  HelperUsageError,
-  readToolArgument,
-  runAndCapture,
-} from "../../../launcher/src/team-helper.ts";
+import { HelperUsageError, readToolArgument, runAndCapture } from "#launcher/team-helper.ts";
 
 /** docker-agent's tool-result limit is 51200 bytes; leave room for page framing. */
 export const PAGE_CONTENT_BYTE_LIMIT = 40_000;

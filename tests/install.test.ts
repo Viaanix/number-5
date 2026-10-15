@@ -18,7 +18,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { quoteForPosixShell } from "../launcher/src/shell-quote.ts";
+import { quoteForPosixShell } from "#launcher/shell-quote.ts";
+
 import {
   BLOCK_BEGIN_MARKER,
   BLOCK_END_MARKER,

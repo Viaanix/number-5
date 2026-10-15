@@ -14,7 +14,7 @@ import {
   readToolArgument,
   runAndCapture,
   runHelper,
-} from "../../../launcher/src/team-helper.ts";
+} from "#launcher/team-helper.ts";
 
 // Pull request numbers: digits only.
 const PULL_REQUEST_NUMBER_PATTERN = /^[0-9]+$/;

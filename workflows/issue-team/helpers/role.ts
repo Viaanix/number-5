@@ -8,11 +8,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
-import {
-  HelperUsageError,
-  readToolArgument,
-  runHelper,
-} from "../../../launcher/src/team-helper.ts";
+import { HelperUsageError, readToolArgument, runHelper } from "#launcher/team-helper.ts";
 
 const ROLES_DIRECTORY = join(import.meta.dir, "..", "roles");
 const ROLE_FILE_EXTENSION = ".md";

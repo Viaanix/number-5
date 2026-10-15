@@ -9,7 +9,8 @@ import {
   createTemporaryDirectory,
   removeTemporaryDirectories,
   runGit,
-} from "../../../launcher/test/fixtures.ts";
+} from "#launcher-test/fixtures.ts";
+
 import { MAX_BODY_BYTES, paginate } from "../helpers/snapshot.ts";
 import { commitFile, createReviewProject, type ReviewProject } from "./review-project.ts";
 
