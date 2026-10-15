@@ -124,6 +124,18 @@ A `new` worktree whose branch `worktree-<name>` already exists without the direc
 
 **Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `effort`, `queue`, `queue-label`, `max-rounds`, `print`, `help`, `version`, `check`, `proxy`, `login`.
 
+**Independence.** A team where one agent reviews the work of others can say so:
+
+```yaml
+independence:
+  reviewer: reviewer             # the agent whose model class must differ
+  reviews: [builder, tester]     # from each of these agents' (all named in team.yaml)
+```
+
+"Class" is the model's tier: `haiku`, `sonnet`, `opus` or `fable`, whatever the version (Sonnet 5.5 and Sonnet 4.6 are one class). Before it creates any worktree, `j5` reads the models the agents run on with the chosen `--effort` applied (`docker agent debug config`), puts the reviewer **one tier above the highest builder tier** (the nearest tier the team offers above it; one tier below when nothing is above, so a Fable builder gets an Opus reviewer), and passes the matching `reviewer-on-<tier>` flavor after the effort. It prints one line saying what it chose. The team offers tiers by defining flavors named `reviewer-on-<tier>` in team.yaml, each patching the reviewer's model. Those flavors are not efforts: they are not listed and `--effort reviewer-on-opus` is rejected.
+
+`j5` refuses to launch when no offered tier differs from the builders', when a model's id names no tier, or when `--model` or `--flavor` follows `--` (`docker agent debug config` has no `--model`, so such an override would change the models after the rule was checked). `bun run validate:teams` checks every `reviewer-on-<tier>` flavor and every effort. Logic: `launcher/src/independence.ts`, `reviewer-flavor.ts`.
+
 **Queue block.** An entry point can also run over a queue:
 
 ```yaml

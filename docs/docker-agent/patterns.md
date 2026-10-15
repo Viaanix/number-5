@@ -23,6 +23,9 @@ A sub-agent does not see the coordinator's conversation. Instructions spell out 
 ### A read-only reviewer
 With native agents the reviewer gets `git` (read-only), file reads without `write_file`, and one script tool for the diff, so it cannot edit or run the project. A harness reviewer has Claude Code's full tool set: read-only is an instruction it is trusted to keep, and its prompt says so. Verification results reach it as *claims* from the team, and it is told to weigh them as claims.
 
+### A reviewer on a different model class than the builders
+A model reviewing work from its own class shares its blind spots. The manifest's `independence` block names the reviewer and the agents it reviews; team.yaml offers `reviewer-on-<tier>` flavors that each patch only the reviewer's model; `j5` reads the real models after the effort is applied and picks the tier one step above the builders (one below from the top), then verifies the result and refuses to launch otherwise. A flavor is used instead of `--model` so the reviewer keeps its `reasoning_effort`. See `docs/launcher.md`.
+
 ### Fixed output templates for agent-to-agent reports
 The reviewer answers in an exact template (`VERDICT: ...`, then fixed sections, "None" when empty). The coordinator can act on it without parsing prose, and a missing section is visible.
 

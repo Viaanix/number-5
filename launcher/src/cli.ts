@@ -53,10 +53,12 @@ import {
   parseRoundLimit,
   type RoundLimit,
 } from "./queue.ts";
+import { chooseAutomaticFlavors } from "./reviewer-flavor.ts";
 import { runPlan, runQueue } from "./run.ts";
 import { createSetupEnvironment, runSetup } from "./setup.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
+import { createDockerAgentRunner } from "./team-models.ts";
 import { discoverTeams, resolveTeamsDirectory } from "./teams.ts";
 
 // This file lives at <root>/launcher/src/cli.ts; teams live under <root>/workflows/. <root> is the
@@ -562,6 +564,18 @@ async function launch(
       ? await chooseBaseRef(projectRoot, requestedBaseRef, interaction)
       : undefined;
   const effort = await chooseEffort(team, parsedArguments.optionValues.get("effort"), interaction);
+  // For a team that keeps its reviewer independent of its builders, choose the reviewer's model
+  // tier now, from the models the effort sets, and stop before any worktree exists if it cannot be
+  // done. docker-agent is asked for the real, merged models; see launcher/src/reviewer-flavor.ts.
+  const automaticFlavors = chooseAutomaticFlavors(
+    team,
+    effort,
+    parsedArguments.passthroughArguments,
+    createDockerAgentRunner(team.directory),
+  );
+  if (automaticFlavors.explanation !== undefined) {
+    console.error(`j5: ${automaticFlavors.explanation}`);
+  }
   const queueChoice = await chooseQueue(
     entryPointName,
     entryPoint,
@@ -588,6 +602,7 @@ async function launch(
       repositoryName,
       parameterValues: values,
       effort,
+      automaticFlavors: automaticFlavors.flavorNames,
       baseRef,
       worktree: resolveWorktreeFacts(
         team,

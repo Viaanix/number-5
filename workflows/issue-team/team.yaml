@@ -22,9 +22,11 @@ providers:
 # accepts an explicit reasoning_effort for Claude's adaptive thinking instead. Every model
 # here needs one: without it the pinned adapter sends `thinking: disabled`, which
 # Sonnet 5.5 rejects.
-# The reviewer used to run on Opus. claude-opus-5-5 is not usable here: Anthropic answers
-# "Claude Code 2.1.75 does not support this model; version 2.1.280 or newer is required"
-# to the proxy's login, so every role uses Sonnet 5.5 (2026-10-15, docker-agent v1.145.0).
+# The builders (coordinator, builder, tester) run on Sonnet 5.5. The reviewer runs on a different
+# model tier, chosen by j5 from theirs (`independence` in workflow.yaml, the reviewer-on-<tier>
+# flavors below): Opus 4.7 here. claude-opus-5-5 and claude-fable-5-1 are not usable: Anthropic
+# answers "Claude Code 2.1.75 does not support this model; version 2.1.280 (2.1.251 for Fable)
+# or newer is required" to the proxy's login (2026-10-15, docker-agent v1.145.0).
 models:
   coordinator_model:
     provider: pi
@@ -49,7 +51,7 @@ models:
         reasoning_effort: high
   reviewer_model:
     provider: pi
-    model: claude-sonnet-5-5
+    model: claude-opus-4-7
     max_tokens: 16384
     provider_opts:
       extra_body:
@@ -185,8 +187,14 @@ permissions:
 
 # Effort levels, chosen with `j5 issue-team ... --effort <name>` (docker agent run
 # --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
-# the file as written (every agent on Sonnet 5.5 at effort high).
+# the file as written (the builders on Sonnet 5.5 at effort high, the reviewer on Opus 4.7).
 # docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
+#
+# The reviewer-on-<tier> flavors are not efforts and --effort rejects them: j5 adds one itself,
+# after the effort, so the reviewer is one model tier above the builders (or one below when the
+# builders are already on the top tier). `low` puts the builders on Haiku, so j5 adds
+# reviewer-on-sonnet; the default builders are Sonnet, so it adds reviewer-on-opus. Only tiers
+# listed here can be chosen; Fable is not, because the proxy cannot serve it yet.
 flavors:
   low:
     models:
@@ -206,7 +214,14 @@ flavors:
           extra_body:
             reasoning_effort: medium
       reviewer_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
+  reviewer-on-sonnet:
+    models:
+      reviewer_model:
+        model: claude-sonnet-5-5
+  reviewer-on-opus:
+    models:
+      reviewer_model:
+        model: claude-opus-4-7

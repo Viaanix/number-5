@@ -67,6 +67,11 @@ export type LaunchRequest = {
   parameterValues: Record<string, string>;
   /** A flavor name from the team's team.yaml, or undefined for the team's defaults. */
   effort: string | undefined;
+  /**
+   * Flavors j5 chose itself (the reviewer's tier, launcher/src/reviewer-flavor.ts), applied after
+   * the effort so they see the models the effort set.
+   */
+  automaticFlavors: string[];
   /** Ref a new worktree branches from; required when the worktree mode is `new`. */
   baseRef: string | undefined;
   /** What exists at the worktree path; required when the worktree mode is `new` or `pr`. */
@@ -228,6 +233,9 @@ export function buildLaunchPlan(request: LaunchRequest): LaunchPlan {
   ];
   if (request.effort !== undefined) {
     commandWords.push("--flavor", request.effort);
+  }
+  for (const automaticFlavor of request.automaticFlavors) {
+    commandWords.push("--flavor", automaticFlavor);
   }
 
   let preparationSteps: string[][] = [];

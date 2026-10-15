@@ -153,12 +153,16 @@ describe("j5 --print", () => {
           ISSUE_TEAM_CONFIG,
           "--agent",
           "root",
+          "--flavor",
+          "reviewer-on-opus",
           "--working-dir",
           worktreePath,
           expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "12" }),
         ],
       ),
-      standardError: "",
+      // The launcher says which tier it put the reviewer on and why, so the choice is never silent.
+      standardError:
+        "j5: reviewer 'reviewer' runs on opus (builder sonnet, tester sonnet), so the review is independent",
     });
     // --print has no side effects: the worktree is only described.
     expect(existsSync(worktreePath)).toBe(false);
@@ -190,7 +194,7 @@ describe("j5 --print", () => {
       `fetch origin ${quoteForThisPlatform(FIXTURE_FEATURE_BRANCH)}`,
     );
     expect(result.standardOutput).toEndWith(
-      `--agent root --flavor low --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
+      `--agent root --flavor low --flavor reviewer-on-sonnet --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
     );
   });
 
@@ -421,6 +425,8 @@ describe("j5 launching", () => {
         ISSUE_TEAM_CONFIG,
         "--agent",
         "root",
+        "--flavor",
+        "reviewer-on-opus",
         "--working-dir",
         worktreePath,
         expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "5" }),
