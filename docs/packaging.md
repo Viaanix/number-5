@@ -26,6 +26,21 @@ Needs [Bun](https://bun.sh) 1.4.2 or newer, Docker with the `docker agent` plugi
 
    Open a new terminal if `j5` is not found: Bun prints the global bin directory to add to `PATH`.
 
+   **Using `npm` instead of `bun add`?** `j5` still runs on Bun, but the package can be fetched with `npm`. Put the scope and token in `~/.npmrc` (GitHub's documented form for its npm registry; not yet run against this package) and install globally:
+
+   ```ini
+   @viaanix:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken=<the token from step 1>
+   ```
+
+   ```bash
+   npm install -g @viaanix/number-5
+   ```
+
+   That file holds the token itself, so keep it out of any repository and owner-only.
+
+   **`E404 … registry.npmjs.org/@viaanix%2fnumber-5`** means the scope is not configured: the tool asked npmjs.org, never GitHub. It says nothing about whether you have access. Add the scope line above (or the `bunfig.toml` block) and try again. A **401** from `npm.pkg.github.com` means the scope is configured but the token is missing, wrong, or not authorised for Viaanix SSO. A **404** from `npm.pkg.github.com` would mean your account cannot see the package, so check you have Read on the repository.
+
 **Upgrade:** `bun update -g @viaanix/number-5`, then **`j5 setup` again**. The skills are copies in `~/.agents/skills/`, and the teams read their framework references from there; `j5 setup --check` reports a skill as `stale` when the copy no longer matches the installed version.
 
 **Remove:** `bun remove -g @viaanix/number-5`. The skill copies in `~/.agents/skills/` are left behind; only directories holding a `.installed-by-number-5` file are ours to delete.
