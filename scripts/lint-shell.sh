@@ -13,8 +13,11 @@ cd "$repository_root"
 # A shebang naming sh or bash, e.g. `#!/bin/sh` or `#!/usr/bin/env bash`.
 readonly SHELL_SHEBANG_PATTERN='^#!.*[/ ](ba)?sh([[:space:]]|$)'
 
+# .vite-hooks/_ is the hook dispatcher `vp config` generates and git-ignores (its own
+# .gitignore is `*`). Its scripts are third-party and source a file shellcheck cannot
+# follow, so they would fail the lint without being this repository's code.
 list_files() {
-  find . \( -path ./node_modules -o -path ./.git \) -prune -o -type f "$@" -print
+  find . \( -path ./node_modules -o -path ./.git -o -path ./.vite-hooks/_ \) -prune -o -type f "$@" -print
 }
 
 # Executables are found by shebang, so a new helper in any team's bin/ is linted
