@@ -1,6 +1,6 @@
 {
   "name": "@viaanix/number-5",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agentic workflows built on docker-agent, and j5, the launcher that runs them against any project checkout",
   "repository": {
     "type": "git",
