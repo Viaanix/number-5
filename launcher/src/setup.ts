@@ -45,7 +45,7 @@ const OWNER_ONLY_FILE_MODE = 0o600;
 // proxy's credential volume. Same command the proxy README gives.
 const PI_LOGIN_ENTRYPOINT = "bun";
 const PI_LOGIN_ARGUMENTS = [
-  "/app/node_modules/@mariozechner/pi-coding-agent/dist/cli.js",
+  "/app/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
   "--no-session",
   "--no-tools",
   "--no-extensions",
@@ -442,7 +442,7 @@ async function setUpProxy(
   let hasModels = await reportProxyModels(environment, token, reporter);
   if (!hasModels && options.withLogin) {
     emit(
-      "info     opening Pi: type /login, choose 'Use a subscription', then 'Anthropic (Claude Pro/Max)'. Open the printed link in your browser; exit Pi when it says you are logged in. Use your own account, never a shared one.",
+      "info     opening Pi: type /login, choose Anthropic, then 'Browser login' ('Copy code login' on a machine without a browser). Open the printed link in your browser; exit Pi when it says you are logged in. Use your own account, never a shared one.",
     );
     const loginExitCode = environment.runAttached([
       ...composeWords,

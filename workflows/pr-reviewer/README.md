@@ -62,7 +62,8 @@ does not start Docker services or obtain credentials for you.
 
 The two options are independent. The flavors behind them are generated into `team.yaml` from `workflows/flavors.yaml` (`bun run flavors`).
 
-The model IDs are supplied by the proxy's versioned `models.json`. Catalogue presence
+The model IDs are built into Pi 1.x (the proxy image mounts no `models.json`; a hand-written entry
+would replace the built-in definition and its adaptive-thinking metadata). Catalogue presence
 is not proof that an account can use a model. These two model/tool paths have
 live receipts below; there is no fallback to an older model on failure.
 

@@ -456,7 +456,7 @@ describe("logging the proxy in", () => {
       "--entrypoint",
       "bun",
       "proxy",
-      "/app/node_modules/@mariozechner/pi-coding-agent/dist/cli.js",
+      "/app/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
       "--no-session",
       "--no-tools",
       "--no-extensions",
