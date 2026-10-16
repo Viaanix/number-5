@@ -99,10 +99,27 @@ const quoteForThisPlatform = RUNNING_ON_WINDOWS ? quoteForPowerShell : quoteForP
 
 type CliResult = { exitCode: number; standardOutput: string; standardError: string };
 
+// issue-team's independence rule makes even `--print` ask `docker agent debug config` which
+// models the team runs on, so every CLI run needs a `docker` that answers. Without this, a test
+// passes only on a machine that has the docker-agent plugin (it failed on CI's macOS and
+// Windows runners, which do not). Built once: on Windows it is a compiled executable.
+let dockerStandInDirectory: string | undefined;
+function pathWithDockerStandIn(): string {
+  if (dockerStandInDirectory === undefined) {
+    dockerStandInDirectory = createTemporaryDirectory();
+    writeFakeExecutable(
+      dockerStandInDirectory,
+      "docker",
+      join(import.meta.dir, "fixtures", "fake-docker.ts"),
+    );
+  }
+  return `${dockerStandInDirectory}${delimiter}${readPathValue(process.env)}`;
+}
+
 function runCli(
   cliArguments: string[],
   workingDirectory: string,
-  pathValue: string = readPathValue(process.env),
+  pathValue: string = pathWithDockerStandIn(),
   extraEnvironment: Record<string, string> = {},
 ): CliResult {
   // The Bun that is running this test, not whatever `bun` is on PATH: some tests give the launcher
@@ -265,6 +282,7 @@ async function runCliInTerminal(
   });
   const childProcess = Bun.spawn(["bun", CLI_PATH, ...cliArguments], {
     cwd: workingDirectory,
+    env: withPathValue(process.env, pathWithDockerStandIn()),
     terminal,
   });
   let timedOut = false;
