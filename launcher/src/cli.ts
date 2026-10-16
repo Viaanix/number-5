@@ -143,7 +143,7 @@ function formatUsage(): string {
     "Options:",
     "  --project <path>   checkout to work on (default: the current directory's git repository)",
     "  --base <ref>       branch a new worktree from this ref (default: the remote default branch)",
-    "  --model <tier>     model tier for the team's builders: haiku, sonnet or opus, as the team offers (default: team.yaml as written)",
+    "  --model <tier>     model tier for the team's builders: haiku, sonnet, opus or fable, as the team offers (default: team.yaml as written)",
     "  --effort <level>   reasoning effort: low, medium, high or xhigh, as the team offers (default: team.yaml as written)",
     "  --queue <n,n,...>  run the entry point once per value, unattended (entry points with a queue)",
     "  --queue-label <l>  the same, over every open issue (or pull request) with this label (needs gh access to the repo)",

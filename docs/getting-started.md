@@ -364,7 +364,7 @@ cd ~/code/practice-repo
 j5 list
 ```
 
-This lists the teams and what each one needs. You will see `issue-team` (take a GitHub issue to a pull request), `pr-reviewer` (review a pull request), and `test-quality`.
+This lists the teams and what each one needs. You will see `issue-team` (take a GitHub issue to a pull request), `pr-reviewer` (review a pull request), `test-quality`, and `triage` (decide whether a GitHub issue can be worked on as written, and label it).
 
 ### 7.2 See what a command would do, without running it
 

@@ -35,13 +35,16 @@ j5 issue-team work-issue --issue 123 --project ~/code/app --model haiku --effort
 j5 issue-team work-issue --issue 123 --base origin/release-2
 j5 pr-reviewer review --pr 456 -- --safety balanced   # after --: raw docker agent run flags
 j5 issue-team work-issue --issue 123 --print    # show the exact command, run nothing
+j5 issue-team work-issue --queue 474,480        # several issues, one after another, unattended
+j5 pr-reviewer review --queue-unreviewed        # every open PR without a review of its latest commit
+j5 triage triage --issue 123                    # label an issue ready / needs-info / needs-decision, or split it
 ```
 
 | Option | Meaning | Default |
 |---|---|---|
 | `--project <path>` | Checkout the team works on; any path inside a git repository | The repository around the current directory, any subdirectory; asked for only when you are not in one |
 | `--base <ref>` | Ref a `new` worktree branches from. Only for `new` worktrees | The remote default branch (`origin/HEAD`, else `gh`) |
-| `--model <tier>` | Model tier for the team's builders, `haiku`, `sonnet` or `opus` as the team offers; passed as `--flavor model-<tier>` ([flavors](#model-and-effort-flavors)) | None: the team as written |
+| `--model <tier>` | Model tier for the team's builders, `haiku`, `sonnet`, `opus` or `fable` as the team offers; passed as `--flavor model-<tier>` ([flavors](#model-and-effort-flavors)) | None: the team as written |
 | `--effort <level>` | Reasoning effort, `low`, `medium`, `high` or `xhigh` as the team offers; passed as `--flavor effort-<level>`. Independent of `--model` | None: the team as written |
 | `--<parameter> <value>` | The entry point's parameters, e.g. `--issue 123` | Asked for, or an error when not in a terminal |
 | `--queue <n,n,…>` | Run the entry point once per value, unattended ([queue runs](#queue-runs)). Only entry points with a `queue:` block | |
@@ -50,6 +53,9 @@ j5 issue-team work-issue --issue 123 --print    # show the exact command, run no
 | `--max-rounds <n\|none>` | Fix rounds per queue item; `none` for no limit | 5 |
 | `--print` | Print the command as one line instead of running it: bash/zsh syntax on Linux and macOS, PowerShell on Windows. A queue prints one line per item | |
 | `-- …` | Everything after a bare `--` is appended to `docker agent run` | |
+| `--help`, `-h` | The usage text | |
+
+`j5 setup` takes `--check`, `--proxy` and `--login` instead of these; they are documented under [what `j5 setup` does](packaging.md#what-j5-setup-does).
 
 Anything missing is asked for when stdin and stdout are a terminal; otherwise it is an error (exit 2). When anything was asked, the command is shown and confirmed before it runs. Ctrl-C at a prompt exits 130 and launches nothing. Once docker-agent is running, Ctrl-C belongs to its TUI.
 
@@ -158,7 +164,7 @@ independence:
 
 Every team offers the same two launch options, `--model <tier>` and `--effort <level>`, as standard flavors named `model-<tier>` and `effort-<level>`. docker-agent has no include or import for flavors (they live in each `team.yaml`; its own idea of reuse is the same names in every file), so they are defined once and **generated**:
 
-- `workflows/flavors.yaml` is the catalog: which model id each tier means (`haiku`, `sonnet`, `opus`) and which efforts exist (`low`, `medium`, `high`, `xhigh`).
+- `workflows/flavors.yaml` is the catalog: which model id each tier means (`haiku`, `sonnet`, `opus`, `fable`) and which efforts exist (`low`, `medium`, `high`, `xhigh`).
 - A team's `workflow.yaml` says which of its named models the options change:
 
   ```yaml

@@ -26,7 +26,7 @@ Default data directory: `~/.cagent` (sessions, worktrees under `~/.cagent/worktr
 
 ## team.yaml keys used here
 
-Keys used by native model agents, including issue-team and pr-reviewer. test-quality remains a `harness: claude-code` team, for which `instruction_file`, `toolsets`, `skills`, `sub_agents`, `add_prompt_files` and `permissions` have no effect ([gotcha](gotchas.md#a-harness-claude-code-agent-gets-none-of-docker-agents-agent-extras)). Comments come from `--help`, the team READMEs and receipts in [gotchas.md](gotchas.md); `docker agent debug config` is the check when in doubt.
+Keys used by native model agents, which is every team here. A `harness: claude-code` agent (no team uses one now) is the exception: for it `instruction_file`, `toolsets`, `skills`, `sub_agents`, `add_prompt_files` and `permissions` have no effect ([gotcha](gotchas.md#a-harness-claude-code-agent-gets-none-of-docker-agents-agent-extras)). Comments come from `--help`, the team READMEs and receipts in [gotchas.md](gotchas.md); `docker agent debug config` is the check when in doubt.
 
 ```yaml
 models:                       # named model configs, referenced by agents

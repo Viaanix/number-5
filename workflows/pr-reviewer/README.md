@@ -37,7 +37,7 @@ j5 pr-reviewer review --pr 123 --project ~/code/app --print
 ```
 
 Without the installed alias, use this repository's `bin/j5`. The reviewer's 12
-tools are all read-only and are pre-approved by name in `team.yaml`
+read-only tools are pre-approved by name in `team.yaml`
 (`permissions.allow`), so a review runs without per-call prompts. A tool added
 later still asks. For a non-interactive run, add `--exec`:
 
@@ -189,9 +189,13 @@ are detached at the freshly fetched PR head, so a PR branch already checked out
 elsewhere is not claimed, moved or reset. An editable (attached) PR worktree, if a
 team defines one, keeps its separate `<project>-pr-<number>` path and branch tracking.
 
-A reused review worktree is not refreshed automatically. If it is stale or
-dirty, the context helper blocks rather than silently reviewing the wrong
-revision. Refresh or preserve local changes outside the reviewer. If the PR base
+An existing review worktree is moved to the freshly fetched PR head before each
+run (`git -C <path> fetch origin <branch>`, then `checkout --detach FETCH_HEAD`), so a
+PR that gained a commit is reviewed at its new head. If the worktree has uncommitted
+changes that conflict with the new head, that step fails and the review does not
+start; changes that do not conflict are carried over, and the context helper then
+blocks on the dirty checkout rather than silently reviewing the wrong revision.
+Preserve local changes outside the reviewer. If the PR base
 object is absent, fetch that base/history yourself and rerun. Older branch-based
 review worktrees are not converted or deleted automatically.
 
