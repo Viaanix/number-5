@@ -130,4 +130,20 @@ flavors:
         provider_opts:
           extra_body:
             reasoning_effort: xhigh
+  queue-unattended:
+    permissions:
+      allow:
+        - read_file
+        - read_multiple_files
+        - list_directory
+        - directory_tree
+        - search_files_content
+        - git_status
+        - git_log
+        - git_branches
+        - git_show
+        - git_blame
+        - pr_context
+        - pr_diff
+        - pr_comment
 # END GENERATED FLAVORS

@@ -6,6 +6,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { z } from "zod";
+
 import {
   buildFlavors,
   type FlavorCatalog,
@@ -279,5 +281,122 @@ entrypoints:
     );
     expect(section).toBeUndefined();
     expect(problems).toEqual(["flavors.models: 'nope' is not a model in team.yaml"]);
+  });
+});
+
+describe("the queue-unattended flavor", () => {
+  const TUNING = { tunableModels: ["builder_model"], reviewerModels: [] };
+  const TEAM_YAML = `
+agents:
+  root: { model: builder_model }
+models:
+  builder_model: { provider: pi, model: claude-sonnet-5-5 }
+permissions:
+  allow: [read_file, git_log]
+`;
+
+  // Catches the flavor carrying only the approved tools: a list in a flavor replaces the base
+  // list (docs/docker-agent/gotchas.md), so every read tool would ask again and an unattended
+  // run would reject them.
+  test("lists team.yaml's allowed tools, then the approved ones, last in the block", () => {
+    const flavors = buildFlavors(CATALOG, {
+      ...TUNING,
+      queueApproval: {
+        approvedTools: ["pr_comment"],
+        alreadyAllowedTools: ["read_file", "git_log"],
+      },
+    });
+    expect(flavors["queue-unattended"]).toEqual({
+      permissions: { allow: ["read_file", "git_log", "pr_comment"] },
+    });
+    expect(Object.keys(flavors).at(-1)).toBe("queue-unattended");
+    expect(Object.keys(buildFlavors(CATALOG, TUNING))).not.toContain("queue-unattended");
+  });
+
+  test("is written into team.yaml as permissions, not as models", () => {
+    const parsed = z
+      .object({
+        flavors: z.record(
+          z.string(),
+          z.object({
+            permissions: z.object({ allow: z.array(z.string()) }).optional(),
+            models: z.unknown().optional(),
+          }),
+        ),
+      })
+      .parse(
+        Bun.YAML.parse(
+          renderGeneratedSection(
+            buildFlavors(CATALOG, {
+              ...TUNING,
+              queueApproval: { approvedTools: ["pr_comment"], alreadyAllowedTools: ["read_file"] },
+            }),
+          ),
+        ),
+      );
+    expect(parsed.flavors["queue-unattended"]?.permissions?.allow).toEqual([
+      "read_file",
+      "pr_comment",
+    ]);
+    expect(parsed.flavors["queue-unattended"]?.models).toBeUndefined();
+    expect(parsed.flavors["model-haiku"]?.permissions).toBeUndefined();
+  });
+
+  test("resolveTuning reads team.yaml's allow list for it", () => {
+    const { tuning, problems } = resolveTuning(["builder_model"], undefined, TEAM_YAML, [
+      "pr_comment",
+    ]);
+    expect(problems).toEqual([]);
+    expect(tuning.queueApproval).toEqual({
+      approvedTools: ["pr_comment"],
+      alreadyAllowedTools: ["read_file", "git_log"],
+    });
+  });
+
+  // Catches an approval that does nothing: the tool is already approved in every run, so the
+  // confirmation the entry point meant to keep for interactive runs is already gone.
+  test("reports a tool that team.yaml already approves", () => {
+    expect(
+      resolveTuning(["builder_model"], undefined, TEAM_YAML, ["git_log"]).problems.join(),
+    ).toContain("'git_log' is already in permissions.allow");
+  });
+
+  // Catches generating a flavor that approves only the named tool when team.yaml has no allow list
+  // to extend, which would silently change what every other tool does.
+  test("reports a team.yaml with no allow list to extend", () => {
+    const withoutAllowList = TEAM_YAML.replace(/permissions:\n {2}allow:.*\n/, "");
+    expect(
+      resolveTuning(["builder_model"], undefined, withoutAllowList, ["pr_comment"]).problems.join(),
+    ).toContain("no permissions.allow list to extend");
+  });
+
+  test("a manifest whose queue approves a tool gets the flavor in its generated section", () => {
+    const manifestText = `
+name: sample-team
+description: A team used by the tests
+team: team.yaml
+entrypoints:
+  review:
+    description: Review
+    agent: root
+    parameters:
+      pr: { type: integer, label: PR }
+    worktree: { mode: none }
+    message: "Review {pr}"
+    queue:
+      parameter: pr
+      preamble: "Unattended"
+      approves: [pr_comment]
+flavors:
+  models: [builder_model]
+`;
+    const team = loadManifest(
+      writeTeamFixture(createTemporaryDirectory(), manifestText, TEAM_YAML),
+    );
+    const { section, problems } = planTeamFlavors(CATALOG, team);
+    expect(problems).toEqual([]);
+    expect(section).toContain(
+      "  queue-unattended:\n    permissions:\n      allow:\n        - read_file\n        - git_log\n        - pr_comment\n",
+    );
   });
 });

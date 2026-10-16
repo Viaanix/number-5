@@ -47,6 +47,25 @@ j5 pr-reviewer review --pr 123 -- --exec
 
 `--safety autonomous` is not needed and would also approve any tool you add later.
 
+### Reviewing every pull request that has changed
+
+```bash
+j5 pr-reviewer review --queue-unreviewed          # every open, non-draft PR without a review of its latest commit
+j5 pr-reviewer review --queue 120,123             # exactly these
+j5 pr-reviewer review --queue-label needs-review  # every open PR with a label
+```
+
+Each queued PR is reviewed unattended, in its own detached worktree, and posts its report as a
+comment. `--queue-unreviewed` is meant for a schedule: it asks `gh` which PRs are open and
+which carry this account's own `Reviewed head SHA:` stamp for their current head, so a PR
+comes back after a push and a run that has caught up prints `no open pull request needs a
+review` and exits 0. Drafts are skipped; reviews and stamps from other accounts are ignored.
+Each item ends with `RESULT: DONE <verdict> PR #<n>: <reason>` or `RESULT: FAILED <reason>`
+(a BLOCKED review, or a comment that was not posted, is FAILED), and the queue's summary under
+`.j5/queue/` lists them. The launcher's [queue documentation](../../docs/launcher.md#pull-request-queues)
+has the rest, including why a single `--pr` run still asks before posting and a queued run does
+not: j5 adds a generated `queue-unattended` flavor that approves `pr_comment` for queue runs only.
+
 The team defines its own provider, so `~/.config/cagent/config.yaml` is optional.
 The endpoint is `http://127.0.0.1:4141/v1`; change the team's provider URL if you
 change the proxy's published port. The proxy must already be running; the workflow
@@ -138,8 +157,9 @@ fetch refs and create a worktree before starting the read-only agent.
 `team.yaml`. In the interactive TUI a dialog shows the full comment text and asks
 before each post (answer `T` to always allow it for the session). **Without a
 terminal, `--exec` rejects it** ("The user rejected the tool call") and the
-reviewer reports `Comment not posted`; for an unattended run that should post,
-pass `-- --exec --safety autonomous`, which approves every tool. It posts as the
+reviewer reports `Comment not posted`. For an unattended run that should post, use a queue
+(`--queue`, `--queue-label` or `--queue-unreviewed`), which approves `pr_comment` for those runs
+only; `-- --exec --safety autonomous` also works for a single run but approves every tool. It posts as the
 account `gh` is using (`gh api user --jq .login`), with a short footer saying it
 is a static review.
 

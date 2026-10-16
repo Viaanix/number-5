@@ -45,7 +45,8 @@ j5 issue-team work-issue --issue 123 --print    # show the exact command, run no
 | `--effort <level>` | Reasoning effort, `low`, `medium`, `high` or `xhigh` as the team offers; passed as `--flavor effort-<level>`. Independent of `--model` | None: the team as written |
 | `--<parameter> <value>` | The entry point's parameters, e.g. `--issue 123` | Asked for, or an error when not in a terminal |
 | `--queue <n,n,…>` | Run the entry point once per value, unattended ([queue runs](#queue-runs)). Only entry points with a `queue:` block | |
-| `--queue-label <label>` | The same, over every open issue with this label, oldest first. Needs a `gh` login (or `GH_TOKEN`) that can see the repository | |
+| `--queue-label <label>` | The same, over every open issue (or, for a queue of pull requests, every open pull request) with this label, oldest first. Needs a `gh` login (or `GH_TOKEN`) that can see the repository | |
+| `--queue-unreviewed` | The same, over every open, non-draft pull request this `gh` account has not reviewed at its current head commit, oldest first. Only for a queue of pull requests ([below](#pull-request-queues)) | |
 | `--max-rounds <n\|none>` | Fix rounds per queue item; `none` for no limit | 5 |
 | `--print` | Print the command as one line instead of running it: bash/zsh syntax on Linux and macOS, PowerShell on Windows. A queue prints one line per item | |
 | `-- …` | Everything after a bare `--` is appended to `docker agent run` | |
@@ -73,7 +74,17 @@ git -C ~/code/my-app fetch origin main && git -C ~/code/my-app worktree add -b w
 - **The outcome comes from the `RESULT:` line**, never the exit code: `docker agent run --exec` exits 0 whenever the agent finishes its turn. No `RESULT:` line means the item failed. The forms are `RESULT: PR <url>`, `RESULT: DONE <what was done>` (for a team whose work is not a pull request, such as [triage](../workflows/triage/README.md)) and `RESULT: FAILED <reason>`.
 - An item that fails (including a failed git step, e.g. its branch already exists) is reported and the queue goes on. An item whose agent could not run at all (docker-agent printed `harness … failed` or `model failed:`, e.g. the Claude session limit) **stops the queue**, since every later item would fail the same way. Ctrl-C stops it after the current item.
 - `j5` exits 0 only when every item opened a pull request or finished with `RESULT: DONE`, 1 otherwise. A draft PR therefore counts as a failed item in the exit code and the summary. The summary's headline stays "N of M opened a pull request." unless an item was `DONE`, then it counts both.
-- In a terminal, an entry point with a queue that gets neither `--<parameter>` nor `--queue` / `--queue-label` asks whether to run one item, a list, or a label. `--print` runs nothing and creates no log directory; `--queue-label` still asks GitHub for the issues.
+- In a terminal, an entry point with a queue that gets neither `--<parameter>` nor `--queue` / `--queue-label` / `--queue-unreviewed` asks whether to run one item, a list, a label, or (for a queue of pull requests) the unreviewed pull requests. `--print` runs nothing and creates no log directory; `--queue-label` and `--queue-unreviewed` still ask GitHub.
+
+### Pull request queues
+
+`j5 pr-reviewer review --queue-unreviewed` reviews every open pull request that has not been reviewed since its last commit, and posts each review as a comment. It is meant to run on a schedule: a run with nothing to review prints `no open pull request needs a review` and exits 0.
+
+- **"Reviewed" means a stamp, not a guess.** Every posted review carries a `Reviewed head SHA: <commit>` line (`pr_comment` refuses a report without it, and both sides read it through `launcher/src/review-status.ts`). A pull request is queued when it is not a draft and none of **the logged-in `gh` account's own comments** carries a stamp for its current head. Pushing a commit changes the head, so the pull request comes back. Comments by other accounts are ignored, so nobody can keep a pull request out of the queue by quoting its head commit.
+- **A review by a different account does not count.** The stamp is matched against the account `gh api user` reports, which is the account `pr_comment` posts as. A repository whose reviews are posted by one account and queued by another would be re-reviewed on every run.
+- **`gh pr list` returns at most 200 pull requests.** A repository with that many open refuses the listing (it would skip the oldest silently); name the ones you want with `--queue` or `--queue-label`.
+- **Posting is approved for queue runs only.** `--exec` rejects a tool nobody can approve, and `pr_comment` is the one tool pr-reviewer leaves unapproved so a person confirms each post. The manifest's `queue.approves: [pr_comment]` makes j5 add the generated `queue-unattended` flavor to each queued run (and only to those), which approves that tool on top of team.yaml's own list. A single `--pr` run still asks.
+- A fork's pull request, whose head is no branch of this repository, fails its own item (the worktree step refuses it) and the queue goes on.
 
 ## The manifest: `workflows/<team>/workflow.yaml`
 
@@ -103,13 +114,13 @@ entrypoints:
 
 **Worktree modes.**
 
-Worktrees go **beside the project**: `<parent of the checkout>/<name>`, e.g. `~/code/my-app-issue-12` for `~/code/my-app`. A path that already holds a linked worktree of the same repository is continued as it is, with no git step; anything else there is refused.
+Worktrees go **beside the project**: `<parent of the checkout>/<name>`, e.g. `~/code/my-app-issue-12` for `~/code/my-app`. A path that already holds a linked worktree of the same repository is continued as it is, with no git step (a detached review snapshot is the one exception, below); anything else there is refused.
 
 | Mode | Worktree, branch | What `j5` runs first | Use for |
 |---|---|---|---|
 | `new` | `worktree.name` from the template; branch `worktree-<name>` | `git fetch origin <base>` (for an `origin/…` base), `git worktree add -b worktree-<name> <path> <base>` | Fresh work from a base branch |
 | `pr` | `<repo>-pr-<n>`; the PR's own branch, tracking `origin/<branch>` | `git fetch origin <branch>`, `git worktree add --track -b <branch> <path> origin/<branch>` (or `git worktree add <path> <branch>` when that local branch exists). Needs `pull_request_parameter: <an integer parameter>` | Continuing a pull request's branch |
-| `pr` with `detached: true` | `<repo>-pr-<n>-detached`; detached HEAD at the fetched PR head | `git fetch origin <branch>`, then `git worktree add --detach <path> FETCH_HEAD` | Read-only reviews without claiming the PR branch |
+| `pr` with `detached: true` | `<repo>-pr-<n>-detached`; detached HEAD at the fetched PR head | `git fetch origin <branch>`, then `git worktree add --detach <path> FETCH_HEAD`; for a snapshot that already exists, `git -C <path> fetch origin <branch>`, then `git -C <path> checkout --detach FETCH_HEAD` | Read-only reviews without claiming the PR branch |
 | `none` | none; runs in the checkout itself | nothing | Read-only, conversational, or in-place entry points |
 
 `detached` is an optional boolean on a `pr` worktree definition; omitted or false
@@ -117,13 +128,18 @@ keeps the editable behavior. pr-reviewer sets it to true. Its separate directory
 prevents an editable follow-up workflow from reusing a detached review snapshot.
 The fresh fetch, not a possibly stale local branch, selects the review commit.
 A detached snapshot does not require moving a branch checked out elsewhere.
-Existing worktrees are still reused as-is, with no automatic refresh/reset.
+Other existing worktrees are still reused as-is, with no automatic refresh/reset. A kept
+detached snapshot is the exception: it exists to be the PR's head, so it is moved to the
+freshly fetched head before each run (the fetch runs inside it, because `FETCH_HEAD` is per
+worktree). Reusing it as it was left made a PR that gained a commit fail its next review as
+stale, which a review queue hits every time. A snapshot with uncommitted changes that conflict
+with the new head fails that step and the run does not start.
 
 **Finding a PR's branch** uses git alone, so it works over an SSH remote with no `gh` login: `git ls-remote origin refs/pull/<n>/head` gives the PR's head commit, and the PR's branch is the one origin branch whose tip is that commit. A PR from a fork (its head is no origin branch), a merged PR whose branch was deleted, and a head shared by several branches are refused with a message. This lookup also runs for `--print` (read-only, needs the network).
 
 A `new` worktree whose branch `worktree-<name>` already exists without the directory (e.g. the directory was deleted, or an older docker-agent worktree elsewhere holds it) stops at `git worktree add`; delete the branch or remove that worktree first.
 
-**Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `model`, `effort`, `queue`, `queue-label`, `max-rounds`, `print`, `help`, `version`, `check`, `proxy`, `login`.
+**Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `model`, `effort`, `queue`, `queue-label`, `queue-unreviewed`, `max-rounds`, `print`, `help`, `version`, `check`, `proxy`, `login`.
 
 **Independence.** A team where one agent reviews the work of others can say so:
 
@@ -161,11 +177,15 @@ Every team offers the same two launch options, `--model <tier>` and `--effort <l
 ```yaml
     queue:
       parameter: issue            # an integer parameter; each queue value fills it
+      items: issues               # or pull-requests: what the numbers are (default issues)
+      approves: []                # tools the queue's unattended runs may call that team.yaml does not pre-approve
       preamble: |                 # goes before `message` for every item
         UNATTENDED QUEUE RUN — issue {issue}, item {position} of {count}. … Fix rounds: {round_limit}. …
 ```
 
 The preamble may use the parameters, `{repo}`, and three placeholders only it has: `{position}` and `{count}` (where the item stands) and `{round_limit}` (`at most 3 fix rounds`, or `no limit on the number of fix rounds`).
+
+`items` decides what `--queue-label` lists and whether `--queue-unreviewed` is allowed (pull requests only). `approves` names tools for the generated `queue-unattended` flavor, which j5 adds to every queued run of the entry point: its `permissions.allow` is team.yaml's own list plus these tools, because a list in a flavor replaces the base list ([gotcha](docker-agent/gotchas.md#a-list-in-a-flavor-replaces-the-base-list-it-does-not-extend-it)). It needs the manifest's `flavors:` block, and `bun run validate:teams` checks the merged result.
 
 **Effort and model** are not declared in the manifest. The valid values are the `model-*` and `effort-*` flavor names in `team.yaml`, read at launch, because docker-agent silently ignores unknown flavors ([gotcha](docker-agent/gotchas.md#an-unknown---flavor-is-silently-ignored)).
 

@@ -47,7 +47,25 @@ What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 
 **Receipt:** a flavor with `models: { lead: { model: claude-haiku-4-5 } }`, resolved with `docker agent debug config team.yaml --flavor low`, keeps `provider: anthropic` from the base and changes only `model`. With a flavor applied, `debug config` no longer prints the `flavors:` section.
 
-**Consequence:** a flavor only needs the keys it changes. Lists are not checked yet; assume a list in a flavor replaces the base list until someone verifies it.
+**Consequence:** a flavor only needs the keys it changes. A list is the exception: see the next entry.
+
+### A list in a flavor replaces the base list; it does not extend it
+
+**Observed:** v1.145.0, 2026-10-16.
+
+**Receipt:** pr-reviewer's `team.yaml` lists 12 tools under `permissions.allow`. With a flavor `only-comment: { permissions: { allow: [pr_comment] } }` added under `flavors:`, `docker agent debug config team.yaml --flavor only-comment` prints
+
+```
+permissions:
+  allow:
+  - pr_comment
+```
+
+The 12 base entries are gone, not joined.
+
+**Consequence:** a flavor that adds one tool to an allow list must restate every tool already in it, or every other tool starts asking for approval again.
+
+**Mitigation:** the `queue-unattended` flavor (`launcher/src/flavor-catalog.ts`) is generated from team.yaml's own list plus `queue.approves`, so it cannot drift, and `bun run validate:teams` compares its merged `permissions.allow` with that list plus the approved tools, and the rest of the merged config with the base (`checkQueueFlavorEffect` in `scripts/validate-teams.ts`).
 
 ### A flavor that names a model the team does not have adds an incomplete model, silently
 

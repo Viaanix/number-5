@@ -3,7 +3,14 @@
 // The launch test puts a fake `docker` first on PATH so nothing reaches a model.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
@@ -336,11 +343,39 @@ describe("j5 in a terminal", () => {
   test("asks for a missing parameter as Need input: <label>", async () => {
     const { projectRoot } = createFixtureProject("prompt-app");
     const result = await runCliInTerminal(
-      ["pr-reviewer", "review", "--model", "sonnet", "--effort", "low", "--print"],
+      ["test-quality", "audit", "--model", "sonnet", "--effort", "low", "--print"],
       projectRoot,
     );
     expect(result.timedOut).toBe(true);
-    expect(result.screenText).toContain("Need input: Pull request number");
+    expect(result.screenText).toContain(
+      "Need input: Test file or directory to audit, relative to the project root",
+    );
+  });
+
+  // Catches a pull request queue that is not offered in a terminal, or offered for an issue queue
+  // that has no use for it.
+  test("offers the unreviewed pull requests only on a queue of pull requests", async () => {
+    const { projectRoot } = createFixtureProject("pr-queue-prompt-app");
+    const reviews = await runCliInTerminal(
+      ["pr-reviewer", "review", "--model", "sonnet", "--effort", "low", "--print"],
+      projectRoot,
+    );
+    const issues = await runCliInTerminal(
+      [
+        "issue-team",
+        "work-issue",
+        "--model",
+        "sonnet",
+        "--effort",
+        "low",
+        "--base",
+        `origin/${FIXTURE_DEFAULT_BRANCH}`,
+        "--print",
+      ],
+      projectRoot,
+    );
+    expect(reviews.screenText).toContain("every open pull request not yet reviewed");
+    expect(issues.screenText).not.toContain("not yet reviewed");
   });
 
   // Catches a queue-capable entry point that never offers the queue in a terminal,
@@ -550,6 +585,36 @@ describe("j5 detached PR reviews", () => {
     expect(runGit(projectRoot, ["status", "--porcelain"])).toBe(sourceStatus);
     expect(readFileSync(localNotesPath, "utf8")).toBe("local work must survive\n");
   });
+
+  // Catches a PR that gains a commit being re-reviewed against the first review's snapshot, which
+  // the reviewer refuses as stale: with a review queue that means a pushed-to PR is never
+  // reviewed again.
+  test("a second review after the PR gains a commit runs at the new head, in the same snapshot", () => {
+    const { projectRoot } = createFixtureProject("refresh-review-app");
+    const branchName = addPullRequestToOrigin(projectRoot, 7);
+    runCli(["pr-reviewer", "review", "--pr", "7"], projectRoot, launchEnvironmentPath);
+    const reviewWorktree = expectedWorktreePath(projectRoot, "refresh-review-app-pr-7-detached");
+    const firstHead = runGit(reviewWorktree, ["rev-parse", "HEAD"]);
+
+    // The PR gains a commit, on its branch and on GitHub's pull ref.
+    runGit(projectRoot, ["checkout", "--quiet", "-b", "pr-update", `origin/${branchName}`]);
+    runGit(projectRoot, ["commit", "--quiet", "--allow-empty", "-m", "another commit"]);
+    const newHead = runGit(projectRoot, ["rev-parse", "HEAD"]);
+    runGit(projectRoot, ["push", "--quiet", "origin", `HEAD:refs/heads/${branchName}`]);
+    runGit(projectRoot, ["push", "--quiet", "origin", "HEAD:refs/pull/7/head"]);
+    runGit(projectRoot, ["checkout", "--quiet", FIXTURE_DEFAULT_BRANCH]);
+
+    const second = runCli(
+      ["pr-reviewer", "review", "--pr", "7"],
+      projectRoot,
+      launchEnvironmentPath,
+    );
+
+    expect(second.exitCode).toBe(FAKE_DOCKER_EXIT_CODE);
+    expect(newHead).not.toBe(firstHead);
+    expect(runGit(reviewWorktree, ["rev-parse", "HEAD"])).toBe(newHead);
+    expect(runGit(reviewWorktree, ["branch", "--show-current"])).toBe("");
+  });
 });
 
 // The JSON line fixtures/fake-docker-queue.ts prints first, read from an item's log.
@@ -706,11 +771,250 @@ describe("j5 queue", () => {
 
   test("refuses --queue for an entry point without a queue", () => {
     const { projectRoot } = createFixtureProject("queue-review-app");
-    const result = runCli(["pr-reviewer", "review", "--queue", "1,2", "--print"], projectRoot);
+    const result = runCli(
+      ["test-quality", "review-branch", "--queue", "1,2", "--print"],
+      projectRoot,
+    );
     expect(result.exitCode).toBe(EXIT_CODE_USAGE);
     expect(result.standardError).toContain(
-      "only apply to entry points with a queue; review has none",
+      "only apply to entry points with a queue; review-branch has none",
     );
+  });
+});
+
+const REVIEWER_LOGIN = "j5-reviewer";
+
+const stampedReport = (headOid: string): string =>
+  `VERDICT: Ship it\n\nReviewed head SHA: ${headOid}\n`;
+
+function listedPullRequest(
+  number: number,
+  overrides: { isDraft?: boolean; comments?: Array<{ login: string | null; body: string }> } = {},
+) {
+  return {
+    number,
+    isDraft: overrides.isDraft ?? false,
+    headRefOid: `${String(number).padStart(2, "0")}${"a".repeat(38)}`,
+    comments: (overrides.comments ?? []).map((comment) => ({
+      author: comment.login === null ? null : { login: comment.login },
+      body: comment.body,
+    })),
+  };
+}
+
+function setUpFakeGh(pullRequests: unknown[], failureText?: string) {
+  const directory = createTemporaryDirectory();
+  writeFakeExecutable(
+    directory,
+    "gh",
+    join(import.meta.dir, "fixtures", "fake-gh-pull-requests.ts"),
+  );
+  const listPath = join(directory, "pull-requests.json");
+  const logPath = join(directory, "calls.log");
+  writeFileSync(listPath, JSON.stringify(pullRequests));
+  return {
+    pathValue: `${directory}${delimiter}${pathWithDockerStandIn()}`,
+    environment: {
+      FAKE_GH_LOGIN: REVIEWER_LOGIN,
+      FAKE_GH_PR_LIST: listPath,
+      FAKE_GH_LOG: logPath,
+      ...(failureText === undefined ? {} : { FAKE_GH_FAIL: failureText }),
+    },
+    readCalls: (): string[] =>
+      existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n") : [],
+  };
+}
+
+function queuedPullRequests(printedCommands: string): Array<[string, string]> {
+  return [...printedCommands.matchAll(/UNATTENDED QUEUE RUN — PR (\d+), item (\d+) of \d+/g)].map(
+    (match): [string, string] => [match[1] ?? "", match[2] ?? ""],
+  );
+}
+
+// The pull request queue (`--queue-unreviewed`, and `--queue-label` over pull requests) with a fake
+// `gh` (fixtures/fake-gh-pull-requests.ts) that answers from a file, so no GitHub is involved.
+describe("j5 pull request queue", () => {
+  // Catches each way the selection can go wrong at once: a review of an older commit still
+  // counting after a push, a stranger's comment quoting the head commit keeping a pull request
+  // out of the queue, a draft being reviewed, and the queue order.
+  test("--queue-unreviewed queues the open, non-draft pull requests without this account's review of their current head, oldest first", () => {
+    const { projectRoot } = createFixtureProject("unreviewed-app");
+    for (const number of [6, 7, 9]) {
+      addPullRequestToOrigin(projectRoot, number);
+    }
+    const current = (number: number) => listedPullRequest(number).headRefOid;
+    const gh = setUpFakeGh([
+      listedPullRequest(9),
+      listedPullRequest(5, {
+        comments: [{ login: REVIEWER_LOGIN, body: stampedReport(current(5)) }],
+      }),
+      listedPullRequest(6, {
+        comments: [{ login: REVIEWER_LOGIN, body: stampedReport("b".repeat(40)) }],
+      }),
+      listedPullRequest(7, {
+        comments: [{ login: "someone-else", body: stampedReport(current(7)) }],
+      }),
+      listedPullRequest(8, { isDraft: true }),
+    ]);
+
+    const result = runCli(
+      ["pr-reviewer", "review", "--queue-unreviewed", "--print"],
+      projectRoot,
+      gh.pathValue,
+      gh.environment,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(queuedPullRequests(result.standardOutput)).toEqual([
+      ["6", "1"],
+      ["7", "2"],
+      ["9", "3"],
+    ]);
+    expect(gh.readCalls()[0]).toBe("api user --jq .login");
+  });
+
+  // Catches an unattended review of a pull request running without the flavor that approves
+  // pr_comment (docker-agent's --exec rejects a tool nobody can approve, so the review would be
+  // written and never posted), and the flavor reaching runs where a person is there to confirm.
+  test("every queued review carries the queue flavor, which a single run does not", () => {
+    const { projectRoot } = createFixtureProject("queue-flavor-app");
+    addPullRequestToOrigin(projectRoot, 4);
+    const gh = setUpFakeGh([listedPullRequest(4)]);
+
+    const queued = runCli(
+      ["pr-reviewer", "review", "--queue-unreviewed", "--print"],
+      projectRoot,
+      gh.pathValue,
+      gh.environment,
+    );
+    const single = runCli(["pr-reviewer", "review", "--pr", "4", "--print"], projectRoot);
+
+    expect(queued.standardOutput).toContain("--flavor queue-unattended");
+    expect(queued.standardOutput).toContain("--exec");
+    expect(single.standardOutput).not.toContain("queue-unattended");
+  });
+
+  // Catches a nightly run that has already caught up failing, which would page someone for
+  // doing nothing.
+  test("--queue-unreviewed with nothing to review exits 0 and starts no run", () => {
+    const { projectRoot } = createFixtureProject("caught-up-app");
+    const gh = setUpFakeGh([
+      listedPullRequest(5, {
+        comments: [{ login: REVIEWER_LOGIN, body: stampedReport(listedPullRequest(5).headRefOid) }],
+      }),
+      listedPullRequest(8, { isDraft: true }),
+    ]);
+
+    const result = runCli(
+      ["pr-reviewer", "review", "--queue-unreviewed"],
+      projectRoot,
+      gh.pathValue,
+      gh.environment,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.standardError).toContain("no open pull request needs a review");
+    expect(existsSync(join(projectRoot, ".j5"))).toBe(false);
+  });
+
+  // Catches --queue-label on a pull request queue listing issues, which would queue issue
+  // numbers as pull requests.
+  test("--queue-label on a pull request queue lists pull requests", () => {
+    const { projectRoot } = createFixtureProject("pr-label-app");
+    addPullRequestToOrigin(projectRoot, 3);
+    const gh = setUpFakeGh([{ number: 3 }]);
+
+    const result = runCli(
+      ["pr-reviewer", "review", "--queue-label", "needs-review", "--print"],
+      projectRoot,
+      gh.pathValue,
+      gh.environment,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(queuedPullRequests(result.standardOutput)).toEqual([["3", "1"]]);
+    expect(gh.readCalls()).toEqual([
+      "pr list --label needs-review --state open --json number --limit 200",
+    ]);
+  });
+
+  // Catches a repository with more open pull requests than gh was asked for being queued as if the
+  // list were complete: the oldest would be skipped without a word.
+  test("--queue-unreviewed refuses a listing that may have been cut short", () => {
+    const { projectRoot } = createFixtureProject("too-many-app");
+    const gh = setUpFakeGh(Array.from({ length: 200 }, (_, index) => listedPullRequest(index + 1)));
+
+    const result = runCli(
+      ["pr-reviewer", "review", "--queue-unreviewed", "--print"],
+      projectRoot,
+      gh.pathValue,
+      gh.environment,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.standardError).toContain("the listing may be cut short");
+  });
+
+  // Catches a lost gh login surfacing as "no pull requests need a review", which a nightly run
+  // would report as success.
+  test("--queue-unreviewed fails, naming the gh login, when gh cannot tell who is logged in", () => {
+    const { projectRoot } = createFixtureProject("no-login-app");
+    const gh = setUpFakeGh([], "HTTP 401: Bad credentials");
+
+    const result = runCli(
+      ["pr-reviewer", "review", "--queue-unreviewed", "--print"],
+      projectRoot,
+      gh.pathValue,
+      gh.environment,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.standardError).toContain("HTTP 401: Bad credentials");
+    expect(result.standardError).toContain("needs a gh login");
+  });
+
+  test.each([
+    [
+      ["issue-team", "work-issue", "--queue-unreviewed"],
+      "--queue-unreviewed only applies to a queue of pull requests; work-issue queues issues",
+    ],
+    [
+      ["pr-reviewer", "review", "--queue-unreviewed", "--queue", "1"],
+      "--queue-unreviewed is an alternative to --queue and --queue-label",
+    ],
+    [
+      ["pr-reviewer", "review", "--queue-unreviewed", "--pr", "3"],
+      "--pr runs one item; --queue / --queue-label run several",
+    ],
+  ])("%p exits 2 with a specific message", (cliArguments, expectedMessage) => {
+    const { projectRoot } = createFixtureProject("pr-queue-usage-app");
+    const result = runCli([...cliArguments, "--print"], projectRoot);
+    expect(result.exitCode).toBe(EXIT_CODE_USAGE);
+    expect(result.standardError).toContain(expectedMessage);
+  });
+
+  // Catches a review queue announcing "at most 5 fix rounds", which a reader takes to mean the
+  // reviewer fixes code. Only a preamble that mentions fix rounds has a limit to report.
+  test("a queue whose preamble has no fix rounds does not report a round limit", () => {
+    const { projectRoot } = createFixtureProject("no-rounds-app");
+    addPullRequestToOrigin(projectRoot, 4);
+
+    const result = runCli(["pr-reviewer", "review", "--queue", "4"], projectRoot);
+
+    expect(result.standardError).toContain("j5: queue: pr-reviewer review, unattended, pr 4");
+    expect(result.standardError).not.toContain("fix rounds");
+    expect(
+      readFileSync(
+        join(
+          projectRoot,
+          ".j5",
+          "queue",
+          readdirSync(join(projectRoot, ".j5", "queue"))[0] ?? "",
+          "summary.md",
+        ),
+        "utf8",
+      ),
+    ).not.toContain("fix rounds");
   });
 });
 

@@ -66,6 +66,14 @@ const worktreeSchema = z.discriminatedUnion("mode", [
 const queueSchema = z.strictObject({
   parameter: z.string().min(1),
   preamble: z.string().min(1),
+  // What the numbers are. It decides what `--queue-label` lists, and only a queue of pull
+  // requests can use `--queue-unreviewed`.
+  items: z.enum(["issues", "pull-requests"]).default("issues"),
+  // Tools that team.yaml leaves off `permissions.allow` so an interactive run asks first, but that
+  // an unattended run must call: `--exec` rejects a tool nobody can approve. Queue runs add the
+  // generated `queue-unattended` flavor (launcher/src/flavor-catalog.ts), which approves exactly
+  // these on top of team.yaml's own list, so a tool added later still asks.
+  approves: z.array(z.string().min(1)).default([]),
 });
 
 const entryPointSchema = z.strictObject({
@@ -194,6 +202,11 @@ export function findManifestProblems(manifest: z.infer<typeof manifestSchema>): 
         if (!allowedInPreamble.includes(placeholderName)) {
           problems.push(`${where}.queue.preamble: unknown placeholder {${placeholderName}}`);
         }
+      }
+      if (entryPoint.queue.approves.length > 0 && manifest.flavors === undefined) {
+        problems.push(
+          `${where}.queue.approves: the queue-unattended flavor that approves them is generated from the manifest's \`flavors:\` block, which this manifest does not have`,
+        );
       }
     }
 

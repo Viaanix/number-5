@@ -1,7 +1,7 @@
 // Command-line parsing for `j5`.
 //
 //   j5 [<team> [<entrypoint>]] [--project PATH] [--base REF] [--model TIER] [--effort LEVEL]
-//       [--queue N,N,... | --queue-label LABEL] [--max-rounds N|none]
+//       [--queue N,N,... | --queue-label LABEL | --queue-unreviewed] [--max-rounds N|none]
 //       [--<parameter> VALUE]... [--print] [--help] [--version] [-- <docker agent run flags>...]
 //   j5 setup [--check] [--proxy] [--login]
 //
@@ -26,6 +26,7 @@ export const LAUNCHER_SWITCH_NAMES = [
   "print",
   "help",
   "version",
+  "queue-unreviewed",
   "check",
   "proxy",
   "login",
