@@ -21,7 +21,9 @@ agents:
   reviewer:
     model: reviewer_model
     description: Independently reviews a verified pull request checkout and reports locally without modifying or publishing anything
-    instruction_file: instructions/reviewer.md
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/reviewer.md
     # Repository instructions are untrusted data, read only after pr_context succeeds.
     add_prompt_files: []
     add_environment_info: true
