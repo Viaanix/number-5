@@ -40,6 +40,7 @@ function dockerAnswering(containerIds: string, inspectedImages: string) {
 }
 
 describe("judgeProxyImage", () => {
+  // Catches a proxy that is already on the pinned image being warned about.
   test("the pinned image running is current", () => {
     expect(judgeProxyImage(EXPECTED, [EXPECTED])).toEqual({ kind: "current", image: EXPECTED });
   });
@@ -108,6 +109,8 @@ describe("checkProxyImage", () => {
     ]);
   });
 
+  // Catches a container created from an older tag being reported as current: the check has to
+  // compare the name the container was created from, not merely find a container.
   test("a container created from an older tag is different", () => {
     const docker = dockerAnswering("abc123def456\n", "j5-pi-openai-proxy:4.9.5\n");
 
@@ -130,6 +133,61 @@ describe("checkProxyImage", () => {
     expect(status).toEqual({ kind: "unknown" });
   });
 
+  // Catches judging a docker that failed: `ps` exits non-zero but printed an id anyway, and the
+  // check went on to inspect it and report a mismatch for a machine it could not see. The fake
+  // answers `inspect` with an older tag, so dropping the exit-code check turns this into
+  // "different".
+  test("a failing docker ps is unknown and nothing is inspected, even when it printed an id", () => {
+    const asked: string[][] = [];
+
+    const status = checkProxyImage(packageRootWithCompose(composeText), (commandWords) => {
+      asked.push(commandWords);
+      return commandWords[1] === "ps"
+        ? { exitCode: 1, standardOutput: "abc123def456\n" }
+        : { exitCode: 0, standardOutput: "j5-pi-openai-proxy:4.9.5\n" };
+    });
+
+    expect(status).toEqual({ kind: "unknown" });
+    expect(asked).toHaveLength(1);
+  });
+
+  // Catches inspecting only the first container: after `j5 setup --proxy` an old container can be
+  // left running next to the new one, and it still answers from the old image.
+  test("every container ps lists is inspected, and one on an older tag makes it different", () => {
+    const docker = dockerAnswering(
+      "abc123def456\n789abc012def\n",
+      `${EXPECTED}\nj5-pi-openai-proxy:4.9.5\n`,
+    );
+
+    const status = checkProxyImage(packageRootWithCompose(composeText), docker.runner);
+
+    expect(status).toEqual({
+      kind: "different",
+      expectedImage: EXPECTED,
+      runningImages: [EXPECTED, "j5-pi-openai-proxy:4.9.5"],
+    });
+    expect(docker.asked[1]).toEqual([
+      "docker",
+      "inspect",
+      "--format",
+      "{{.Config.Image}}",
+      "abc123def456",
+      "789abc012def",
+    ]);
+  });
+
+  // Catches a carriage return or trailing space left on a name or id (CRLF output, a wrapper
+  // script): an image name ending in `\r` never equals the pinned tag, so a current proxy would
+  // look stale.
+  test("CRLF line endings and trailing spaces in docker's output are ignored", () => {
+    const docker = dockerAnswering("abc123def456\r\n", `${EXPECTED}  \r\n`);
+
+    const status = checkProxyImage(packageRootWithCompose(composeText), docker.runner);
+
+    expect(status).toEqual({ kind: "current", image: EXPECTED });
+    expect(docker.asked[1]?.at(-1)).toBe("abc123def456");
+  });
+
   // Catches asking `docker inspect` with no ids, which inspects nothing and fails noisily, and a
   // machine without the proxy being told something about it.
   test("no proxy container is unknown and nothing is inspected", () => {
@@ -141,11 +199,16 @@ describe("checkProxyImage", () => {
     expect(docker.asked).toHaveLength(1);
   });
 
-  test("a failing inspect is unknown, not a mismatch", () => {
+  // Catches judging a partial answer. When a container disappears between `ps` and `inspect`,
+  // docker prints the image it did find and exits 1 (seen with `docker inspect --format
+  // '{{.Config.Image}}' <real id> <missing id>`: the real image on stdout, "no such object" on
+  // stderr, exit 1). The fake does the same with an older tag, so dropping the exit-code check
+  // turns this into "different".
+  test("a failing inspect is unknown, not a mismatch, even when it printed an image", () => {
     const status = checkProxyImage(packageRootWithCompose(composeText), (commandWords) =>
       commandWords[1] === "ps"
         ? { exitCode: 0, standardOutput: "abc123def456\n" }
-        : { exitCode: 1, standardOutput: "" },
+        : { exitCode: 1, standardOutput: "j5-pi-openai-proxy:4.9.5\n" },
     );
 
     expect(status).toEqual({ kind: "unknown" });
@@ -162,10 +225,26 @@ describe("checkProxyImage", () => {
     expect(status).toEqual({ kind: "unknown" });
     expect(dockerWasRun).toBe(false);
   });
+});
 
-  // Catches a compose file that restructured away from `services.proxy.image` silently turning
-  // the check into a no-op that always says nothing.
-  test("a compose file without the proxy image is unknown", () => {
+describe("readExpectedProxy", () => {
+  // Catches a compose file that is not valid YAML breaking a launch: the contract is that
+  // anything the check cannot read is "unknown", and the launch path has no try of its own.
+  test("a compose file that does not parse reads as undefined, not an error", () => {
+    expect(readExpectedProxy(packageRootWithCompose("services: [\n"))).toBe(undefined);
+  });
+
+  // Catches the project name becoming optional: the container lookup filters on it, so a
+  // missing name would filter on "undefined" and find nothing, silently disabling the check.
+  test("a compose file without a name reads as undefined", () => {
+    expect(
+      readExpectedProxy(packageRootWithCompose("services:\n  proxy:\n    image: some/image:1\n")),
+    ).toBe(undefined);
+  });
+
+  // A compose file whose services have no proxy image reads as unknown rather than throwing.
+  // What catches the real file losing it is the test on the shipped file below.
+  test("a compose file without the proxy image reads as undefined", () => {
     expect(readExpectedProxy(packageRootWithCompose("name: p\nservices:\n  other: {}\n"))).toBe(
       undefined,
     );
