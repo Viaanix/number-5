@@ -11,6 +11,7 @@ Agentic workflows ("teams") built on [docker-agent](https://github.com/docker/do
 | [issue-team](workflows/issue-team/README.md) | GitHub issue → pull request, in any repository: ready when review and verification pass, a draft when they do not |
 | [test-quality](workflows/test-quality/README.md) | Audit, review, write or fix tests with the `j5-test-quality` skill, in the current checkout |
 | [pr-reviewer](workflows/pr-reviewer/README.md) | Native PR review with Claude Sonnet 5.5 through the local proxy; returns a report and posts it as one PR comment |
+| [triage](workflows/triage/README.md) | Decide whether a GitHub issue can be worked on as written: label it ready, needs-info or needs-decision, or split it into sub-issues |
 
 ## Quick start
 

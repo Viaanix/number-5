@@ -1,0 +1,33 @@
+name: triage
+description: Decide whether a GitHub issue can be worked on as written; label it ready, needs-info or needs-decision, or split it into sub-issues
+team: team.yaml
+path: [bin]
+# The named models (keys under `models:` in team.yaml) that --model and --effort change. The
+# flavors themselves are generated into team.yaml: `bun run flavors`.
+flavors:
+  models: [triager_model]
+
+entrypoints:
+  triage:
+    description: Triage one issue from the current checkout (read-only) and record the verdict on GitHub; J5_TRIAGE_DRY_RUN=1 writes nothing
+    agent: triager
+    parameters:
+      issue: { type: integer, label: Issue number }
+    # The agent only reads the checkout, so it runs in the project itself and no worktree is made.
+    worktree:
+      mode: none
+    # `j5 triage triage --queue 12,15` (or --queue-label bug) triages each issue in turn, unattended.
+    queue:
+      parameter: issue
+      preamble: |
+        UNATTENDED QUEUE RUN — issue {issue}, item {position} of {count}. Read this first; it overrides your instructions where they differ.
+
+        - Nobody is watching and nobody will answer. Do not ask a question of the user: decide the verdict yourself, and put anything a person needs to know in the issue comment.
+        - Stop instead, and report why in the RESULT line, when something is broken: the issue cannot be read, the checkout is not this repository's code, or a tool fails twice. Do not call triage_apply for an issue you could not read.
+        - Call triage_apply once. If it fails, do not retry it: report FAILED with its message.
+        - The very last line of your final message must be exactly one of these, alone on its line:
+          RESULT: DONE <verdict> #{issue}: <one line: what you decided and why>
+          RESULT: FAILED <one line: what stopped you>
+          Do not write a RESULT line anywhere else.
+    message: |
+      Triage issue #{issue} in the current repository and follow your instructions.

@@ -1,0 +1,3 @@
+#!/bin/sh
+# triage-apply for Linux and macOS; the .cmd launcher supports Windows.
+exec bun "$(dirname "$0")/../helpers/apply.ts" "$@"
