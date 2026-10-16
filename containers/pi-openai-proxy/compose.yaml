@@ -13,6 +13,12 @@ services:
     init: true
     environment:
       PI_PROXY_AUTH_TOKEN: "${PI_PROXY_AUTH_TOKEN:?Export a local proxy bearer token first}"
+      # Anthropic's prompt cache lives 5 minutes by default, so an agent idle for longer (a long
+      # test run) pays to write its whole context again. "long" asks for the 1-hour lifetime.
+      # Measured with a 330 s gap: default missed, long hit (README, "Prompt cache lifetime").
+      # It is read at request time, so no image rebuild or tag bump is needed. Remove the line to
+      # go back to the 5-minute default.
+      PI_CACHE_RETENTION: long
     ports:
       - "127.0.0.1:${PI_PROXY_PORT:-4141}:4141"
     volumes:

@@ -211,6 +211,29 @@ streamed call and on a non-streamed call. Earlier (2026-10-15, with the build-ti
 a ~9,650-token prompt gave `prompt_tokens` 9,646. Not yet watched: a real run's token counter
 accumulating in the Docker Agent sidebar.
 
+## Prompt cache lifetime
+
+Pi marks the prompt for Anthropic's cache. By default the cache lives 5 minutes, so an agent that
+is idle for longer (for example while a long test suite runs) writes its whole context again on its
+next turn. `compose.yaml` sets `PI_CACHE_RETENTION=long`, which makes Pi send `cache_control` with
+`ttl: "1h"` (captured from Pi 1.3.0's request for Sonnet 5.5 and Opus 4.7; without it the field is
+absent).
+
+Measured 2026-10-16 through two containers of this image (one with the setting) and a copy of a
+Claude login, a ~13k-token prompt unique to each, sent twice 330 seconds apart on
+`claude-sonnet-5-5`:
+
+| | First call | After 330 s |
+|---|---|---|
+| Default (5 minutes) | `cache_write_tokens` 13,360 | `cache_write_tokens` 13,360, `cached_tokens` 0: **miss** |
+| `PI_CACHE_RETENTION=long` | `cache_write_tokens` 13,366 (accepted through the subscription login) | `cached_tokens` 13,366, `cache_write_tokens` 0: **hit** |
+
+**The tradeoff was not measured.** On Anthropic's API a one-hour cache write costs more than a
+five-minute one, so a run that never idles past 5 minutes pays a little more for nothing; how this
+counts against a subscription's usage limits is not something this test could show. It is read at
+request time (no image rebuild or tag bump). Remove the line from `compose.yaml` and recreate the
+container to go back to the default.
+
 ## Upstream status and the fork
 
 Treat `@victor-software-house/pi-openai-proxy` as abandoned: 4.9.5 is the latest npm release (published 2026-05-06), the repository's last push was 2026-06-08, and there is no open issue about what we changed. This image runs a build of our fork, [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy), instead. Its PR #1 (merged 2026-10-16) ports the proxy to Pi 1.x (`ModelRuntime` replaces `AuthStorage` and `ModelRegistry.create()`) and fixes `prompt_tokens` at source; PR #2 adds a `chat_request` log line naming the requested and the resolved model of each chat request; PR #3 aligns its docs.
