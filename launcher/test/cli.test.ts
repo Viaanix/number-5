@@ -99,10 +99,27 @@ const quoteForThisPlatform = RUNNING_ON_WINDOWS ? quoteForPowerShell : quoteForP
 
 type CliResult = { exitCode: number; standardOutput: string; standardError: string };
 
+// issue-team's independence rule makes even `--print` ask `docker agent debug config` which
+// models the team runs on, so every CLI run needs a `docker` that answers. Without this, a test
+// passes only on a machine that has the docker-agent plugin (it failed on CI's macOS and
+// Windows runners, which do not). Built once: on Windows it is a compiled executable.
+let dockerStandInDirectory: string | undefined;
+function pathWithDockerStandIn(): string {
+  if (dockerStandInDirectory === undefined) {
+    dockerStandInDirectory = createTemporaryDirectory();
+    writeFakeExecutable(
+      dockerStandInDirectory,
+      "docker",
+      join(import.meta.dir, "fixtures", "fake-docker.ts"),
+    );
+  }
+  return `${dockerStandInDirectory}${delimiter}${readPathValue(process.env)}`;
+}
+
 function runCli(
   cliArguments: string[],
   workingDirectory: string,
-  pathValue: string = readPathValue(process.env),
+  pathValue: string = pathWithDockerStandIn(),
   extraEnvironment: Record<string, string> = {},
 ): CliResult {
   // The Bun that is running this test, not whatever `bun` is on PATH: some tests give the launcher
@@ -153,12 +170,16 @@ describe("j5 --print", () => {
           ISSUE_TEAM_CONFIG,
           "--agent",
           "root",
+          "--flavor",
+          "reviewer-on-opus",
           "--working-dir",
           worktreePath,
           expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "12" }),
         ],
       ),
-      standardError: "",
+      // The launcher says which tier it put the reviewer on and why, so the choice is never silent.
+      standardError:
+        "j5: reviewer 'reviewer' runs on opus (builder sonnet, tester sonnet), so the review is independent",
     });
     // --print has no side effects: the worktree is only described.
     expect(existsSync(worktreePath)).toBe(false);
@@ -190,7 +211,7 @@ describe("j5 --print", () => {
       `fetch origin ${quoteForThisPlatform(FIXTURE_FEATURE_BRANCH)}`,
     );
     expect(result.standardOutput).toEndWith(
-      `--agent root --flavor low --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
+      `--agent root --flavor low --flavor reviewer-on-sonnet --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
     );
   });
 
@@ -243,24 +264,39 @@ const TERMINAL_RUN_TIMEOUT_MILLISECONDS = 3000;
 // Wide enough that the printed command never wraps.
 const TERMINAL_COLUMNS = 400;
 const TERMINAL_ROWS = 50;
+// A pseudo-terminal delivers its output asynchronously, and on Windows (ConPTY) text written
+// just before the process exits can reach the reader after `exited` resolves. A caller that
+// reads output of a run that ends by itself passes the text it expects; the run then waits for
+// that text to arrive. This bound only ends the wait when it never does (the caller's own
+// assertion then fails with what the screen held), so a passing run never waits for it.
+const TERMINAL_OUTPUT_BOUND_MILLISECONDS = 2000;
 
 type TerminalRunResult = { exitCode: number; timedOut: boolean; screenText: string };
 
 async function runCliInTerminal(
   cliArguments: string[],
   workingDirectory: string,
+  expectedOutput?: string,
 ): Promise<TerminalRunResult> {
   const decoder = new TextDecoder();
   let rawScreen = "";
+  const expectedOutputSeen = Promise.withResolvers<void>();
   await using terminal = new Bun.Terminal({
     cols: TERMINAL_COLUMNS,
     rows: TERMINAL_ROWS,
     data(_terminal, data) {
       rawScreen += decoder.decode(data);
+      if (
+        expectedOutput !== undefined &&
+        stripVTControlCharacters(rawScreen).replaceAll("\r", "").includes(expectedOutput)
+      ) {
+        expectedOutputSeen.resolve();
+      }
     },
   });
   const childProcess = Bun.spawn(["bun", CLI_PATH, ...cliArguments], {
     cwd: workingDirectory,
+    env: withPathValue(process.env, pathWithDockerStandIn()),
     terminal,
   });
   let timedOut = false;
@@ -270,6 +306,11 @@ async function runCliInTerminal(
   }, TERMINAL_RUN_TIMEOUT_MILLISECONDS);
   const exitCode = await childProcess.exited;
   clearTimeout(timer);
+  if (expectedOutput !== undefined) {
+    const giveUpTimer = setTimeout(expectedOutputSeen.resolve, TERMINAL_OUTPUT_BOUND_MILLISECONDS);
+    await expectedOutputSeen.promise;
+    clearTimeout(giveUpTimer);
+  }
   return {
     exitCode,
     timedOut,
@@ -327,6 +368,8 @@ describe("j5 in a terminal", () => {
     const subdirectory = join(projectRoot, "src", "deep");
     mkdirSync(subdirectory, { recursive: true });
     // Every other value is a flag, so the project is the only thing left to ask about.
+    // The worktree is added from the repository root, not the subdirectory j5 started in.
+    const expectedWorktreeStep = `-C ${quoteForThisPlatform(canonicalPath(projectRoot))} worktree add -b worktree-terminal-app-issue-12`;
     const result = await runCliInTerminal(
       [
         "issue-team",
@@ -340,13 +383,11 @@ describe("j5 in a terminal", () => {
         "--print",
       ],
       subdirectory,
+      expectedWorktreeStep,
     );
     expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
-    // The worktree is added from the repository root, not the subdirectory j5 started in.
-    expect(result.screenText).toContain(
-      `-C ${quoteForThisPlatform(canonicalPath(projectRoot))} worktree add -b worktree-terminal-app-issue-12`,
-    );
+    expect(result.screenText).toContain(expectedWorktreeStep);
   });
 });
 
@@ -421,6 +462,8 @@ describe("j5 launching", () => {
         ISSUE_TEAM_CONFIG,
         "--agent",
         "root",
+        "--flavor",
+        "reviewer-on-opus",
         "--working-dir",
         worktreePath,
         expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "5" }),

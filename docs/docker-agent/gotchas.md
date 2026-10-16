@@ -232,10 +232,32 @@ still wins over `allow`.
 version 2.1.280 or newer is required (error_code: claude_code_version_too_old)
 ```
 
-`claude-sonnet-5-5` and `claude-haiku-5-5` through the same login work.
+`claude-sonnet-5-5` and `claude-haiku-5-5` through the same login work. So do
+`claude-opus-4-7`, `claude-opus-4-6` and `claude-opus-4-5`: one request each, with and without
+`reasoning_effort: high`, answered `OK` (2026-10-15).
 
-**Consequence:** the proxy's `models.json` does not list Opus 5.5, and issue-team's
-reviewer runs on Sonnet 5.5 where it used to run on Opus. Not tried: a newer Pi release.
+**Fable too.** `claude-fable-5-1`, added to a second proxy's catalogue (it shared the live login
+volume, so there was still one `auth.json`), failed the same way with
+`version 2.1.251 or newer is required`.
+
+**Consequence:** the proxy's `models.json` does not list Opus 5.5 or Fable 5.1. issue-team's
+builders run on Sonnet 5.5 and its reviewer on Opus 4.7, the newest Opus that works. Not tried:
+a newer Pi release, which presents a newer client version and may unlock them.
+
+### `docker agent debug config` takes `--flavor` but not `--model`
+
+**Observed:** v1.145.0, 2026-10-15.
+
+**Receipt:** `docker agent debug config team.yaml --model reviewer=pi/claude-opus-4-7` fails
+(the usage line is `debug config <agent-file>|<registry-ref> [flavor...]`, and `--model` is
+only a flag of `run`). `--flavor` is repeatable and applied in order:
+`--flavor low --flavor reviewer-on-sonnet` printed the builders on `claude-haiku-5-5` and the
+reviewer on `claude-sonnet-5-5`.
+
+**Consequence:** the independence rule reads the real models with `debug config --flavor …`
+(`launcher/src/team-models.ts`) and picks the reviewer's tier with a flavor, not `--model`. A
+`--model` or `--flavor` after `--` would change the models unseen, so `j5` refuses both for a
+team with a rule.
 
 ### `permissions.deny` globs block the spellings they name, and not a branch called `fix-foo`
 

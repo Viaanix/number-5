@@ -64,6 +64,7 @@ function buildRequest(overrides: Partial<LaunchRequest>): LaunchRequest {
     repositoryName: "my-app",
     parameterValues: { issue: "12" },
     effort: undefined,
+    automaticFlavors: [],
     baseRef: "origin/main",
     worktree: { state: { kind: "absent" }, pullRequestBranch: undefined },
     queueItem: undefined,
@@ -106,6 +107,36 @@ describe("buildLaunchPlan — new worktree", () => {
       workingDirectory: NEW_WORKTREE_PATH,
       pathEnvironment: `${TEAM_BIN_DIRECTORY}${delimiter}${INHERITED_PATH}`,
     });
+  });
+
+  // Catches the reviewer's flavor being applied before the effort: docker-agent applies flavors
+  // in order, so the reviewer's tier patch must land on the models the effort already set.
+  test("passes the automatic flavors after the effort flavor, in order", () => {
+    const plan = buildLaunchPlan(
+      buildRequest({ effort: "low", automaticFlavors: ["reviewer-on-sonnet"] }),
+    );
+    expect(plan.commandWords.slice(0, 10)).toEqual([
+      "docker",
+      "agent",
+      "run",
+      TEAM_CONFIG_PATH,
+      "--agent",
+      "root",
+      "--flavor",
+      "low",
+      "--flavor",
+      "reviewer-on-sonnet",
+    ]);
+  });
+
+  test("adds only the automatic flavor when no effort was chosen", () => {
+    const plan = buildLaunchPlan(buildRequest({ automaticFlavors: ["reviewer-on-opus"] }));
+    expect(plan.commandWords.slice(4, 8)).toEqual([
+      "--agent",
+      "root",
+      "--flavor",
+      "reviewer-on-opus",
+    ]);
   });
 
   test("fetches only a remote-tracking base; a local ref or SHA is used as it is", () => {
