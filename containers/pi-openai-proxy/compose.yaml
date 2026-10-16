@@ -3,11 +3,11 @@ name: j5-pi-openai-proxy
 services:
   proxy:
     # The tag is the single source for the published image: .github/workflows/proxy-image.yml
-    # reads it from here. Bump the last number when the Dockerfile, package.json or bun.lock
-    # change; CI refuses to overwrite a tag that is already published, so a machine can never
-    # keep running an older build under the same tag. 4.9.6 is the version of the fork build in
-    # package.json (vx-daniel/pi-openai-proxy), not upstream's unpublished 4.9.6.
-    image: ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-1
+    # reads it from here. Bump the last number when the Dockerfile, package.json or
+    # package-lock.json change; CI refuses to overwrite a tag that is already published, so a
+    # machine can never keep running an older build under the same tag. 4.9.6 is the version of
+    # the fork build in package.json (vx-daniel/pi-openai-proxy); -2 is the first build on Node.
+    image: ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-2
     build:
       context: .
     init: true
@@ -19,10 +19,18 @@ services:
       # It is read at request time, so no image rebuild or tag bump is needed. Remove the line to
       # go back to the 5-minute default.
       PI_CACHE_RETENTION: long
+      # The fork's logging and request-time limit, passed through so they can be set in the same
+      # file as the token (~/.config/cagent/.env, which `j5 setup --proxy` hands to Compose)
+      # without editing this one. Each default is the fork's own, so nothing changes until one is
+      # set: `info`, JSON lines (a container has no terminal, and `pretty` is for reading
+      # `docker compose logs` by eye), and a 120 s ceiling on one upstream request.
+      PI_PROXY_LOG_LEVEL: "${PI_PROXY_LOG_LEVEL:-info}"
+      PI_PROXY_LOG_FORMAT: "${PI_PROXY_LOG_FORMAT:-json}"
+      PI_PROXY_UPSTREAM_TIMEOUT_MS: "${PI_PROXY_UPSTREAM_TIMEOUT_MS:-120000}"
     ports:
       - "127.0.0.1:${PI_PROXY_PORT:-4141}:4141"
     volumes:
-      - pi-auth:/home/bun/.pi/agent
+      - pi-auth:/home/node/.pi/agent
     read_only: true
     tmpfs:
       - /tmp
@@ -30,12 +38,15 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # /healthz is the fork's unauthenticated liveness check: the process listens and Pi's model
+    # runtime loaded. It does not prove a login exists or that a provider accepts a request (that
+    # is `j5 setup --check`, which asks /v1/models), so the container is healthy before you log in.
     healthcheck:
       test:
         - CMD
-        - bun
+        - node
         - -e
-        - "const response = await fetch('http://127.0.0.1:4141/v1/models', { headers: { Authorization: 'Bearer ' + process.env.PI_PROXY_AUTH_TOKEN } }); if (!response.ok) process.exit(1);"
+        - "const response = await fetch('http://127.0.0.1:4141/healthz'); if (!response.ok) process.exit(1);"
       interval: 30s
       timeout: 5s
       start_period: 10s

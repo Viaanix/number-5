@@ -434,13 +434,19 @@ describe("starting the proxy", () => {
 describe("the proxy image", () => {
   const PINNED_IMAGE = "ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-1";
   const LIST_PROXY_CONTAINERS =
-    "docker ps --filter label=com.docker.compose.project=j5-pi-openai-proxy --filter label=com.docker.compose.service=proxy --format {{.Image}}";
+    "docker ps --quiet --filter label=com.docker.compose.project=j5-pi-openai-proxy --filter label=com.docker.compose.service=proxy";
+  const INSPECT_PROXY_CONTAINER = "docker inspect --format {{.Config.Image}} abc123def456";
 
   function createHarnessWithCompose(runningImages: string | undefined) {
     const harness = createHarness({
       environmentVariables: { PI_PROXY_AUTH_TOKEN: "from-the-shell" },
       commands:
-        runningImages === undefined ? {} : { [LIST_PROXY_CONTAINERS]: succeeded(runningImages) },
+        runningImages === undefined
+          ? {}
+          : {
+              [LIST_PROXY_CONTAINERS]: succeeded("abc123def456"),
+              [INSPECT_PROXY_CONTAINER]: succeeded(runningImages),
+            },
     });
     mkdirSync(join(harness.packageRoot, "containers", "pi-openai-proxy"), { recursive: true });
     writeFileSync(
@@ -517,7 +523,7 @@ describe("logging the proxy in", () => {
       "--rm",
       "--no-deps",
       "--entrypoint",
-      "bun",
+      "node",
       "proxy",
       "/app/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
       "--no-session",

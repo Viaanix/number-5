@@ -1,23 +1,25 @@
 # Pi OpenAI proxy container
 
 A standalone OpenAI Chat Completions endpoint for Docker Agent Path C, using
-[`@victor-software-house/pi-openai-proxy`](https://www.npmjs.com/package/@victor-software-house/pi-openai-proxy).
+[`@vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy), our fork of `@victor-software-house/pi-openai-proxy`.
 Docker Agent owns the agent loop and tool execution; Pi supplies model access and
 credential handling. This does not change the existing Claude Code harness workflows.
 
 ## Pinned components
 
-- Bun 1.4.2, with the base image pinned by multi-platform digest.
+- Node 24.22.0 (`node:24.22.0-bookworm-slim`), pinned by multi-platform digest. The fork moved from
+  Bun to Node; the earlier images ran Bun 1.4.2.
 - The proxy: a build of the fork [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy)
-  (release `v4.9.6-j5.1`, fork `main` at `e045a70`): upstream 4.9.6 plus the Pi 1.x port, the
-  `prompt_tokens` fix and a `chat_request` log line. It is installed from the release asset URL in
-  `package.json`, and `bun.lock` records the tarball's hash.
+  (pre-release `v4.9.6-j5.2`, fork `dev` at `c4b7350`): upstream 4.9.6 plus the Pi 1.x port, the
+  `prompt_tokens` fix, LogTape logging with a `/healthz` endpoint and a log level and format setting.
+  It is installed from the release asset URL in `package.json`, and `package-lock.json` records the
+  tarball's integrity hash (the asset's sha256 is `becd0133a688846a6e8b3a393da02f022227d6d663b02155f975d1b6c4ac872a`).
 - Pi 1.3.0 (`@earendil-works/pi-ai`, `pi-coding-agent`, `pi-tui`): the model adapter and the CLI used
   for subscription login. Its Anthropic client identifies as Claude Code 2.1.280.
-- Every resolved dependency is recorded in `bun.lock`; builds use a frozen lockfile
-  and do not run dependency lifecycle scripts.
+- Every resolved dependency is recorded in `package-lock.json`; builds use `npm ci` and do not
+  run dependency lifecycle scripts.
 
-The build context permits only `package.json` and `bun.lock`. Credentials and the
+The build context permits only `package.json` and `package-lock.json`. Credentials and the
 host's Pi configuration/extensions are not copied into the image or bind-mounted. No model
 catalogue file is mounted: see the next section.
 
@@ -118,7 +120,10 @@ Warnings about missing `fd` and `ripgrep` are expected: this image uses Pi for
 login, not coding tools. The proxy does not execute Pi tools.
 
 Pi stores its login in the Compose-managed `pi-auth` volume, mounted at
-`/home/bun/.pi/agent`. The directory is writable so token refreshes and lockfiles
+`/home/node/.pi/agent`. A volume made by the earlier Bun images (mounted at `/home/bun/.pi/agent`)
+works unchanged under the same Compose volume name: the `node` user is UID 1000, like `bun`, and the
+files in it are owned by 1000 (checked 2026-10-16 on a copy of one). The directory is writable so
+token refreshes and lockfiles
 can persist. The host's `~/.pi/agent` is never mounted. Stop a running proxy before
 using this login command again.
 
@@ -132,13 +137,41 @@ else breaks). To silence it, stop the proxy and delete the empty file, then star
 ```bash
 docker compose stop proxy
 docker run --rm --user root -v j5-pi-openai-proxy_pi-auth:/v --entrypoint sh \
-  ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-1 -c 'test ! -s /v/models.json && rm -f /v/models.json'
+  ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-2 -c 'test ! -s /v/models.json && rm -f /v/models.json'
 docker compose up --wait
 ```
 
 The `test ! -s` guard deletes the file only when it is empty, so a `models.json` you wrote
 yourself is kept. Seen and fixed on 2026-10-16 on the volume this was written from; a new volume
 never has the file.
+
+## Logs and settings
+
+The fork logs with LogTape, one JSON object per line on stderr when there is no terminal, which is
+always the case in a container: `@timestamp`, `level`, `message`, `logger`, `properties`. Each chat
+request logs `Chat request for "<requested>" resolved to "<provider>/<model>"` at `info`
+(logger `pi-openai-proxy.server.chat`; properties include `requestId`, `clientRequestId` and
+`stream`), which replaces the `chat_request` line of the earlier images. Checked 2026-10-16: a
+distinctive phrase sent in a prompt appeared 0 times in the logs.
+
+Compose passes three settings through, so they can be set in `~/.config/cagent/.env` (the file
+`j5 setup --proxy` hands to Compose; a plain `docker compose up` does not read it). Each default is
+the fork's own, so nothing changes until one is set:
+
+| Variable | Default here | Effect |
+|---|---|---|
+| `PI_PROXY_LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warning`, `error` or `fatal`. An invalid value is ignored with a warning. Checked: `debug` adds debug lines. |
+| `PI_PROXY_LOG_FORMAT` | `json` | `pretty` prints local-time lines for reading `docker compose logs` by eye. Checked with `pretty`. |
+| `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` | Ceiling on one upstream request; the fork's config allows 5 to 600 seconds. **Not verified that the container honors it.** |
+
+**A possible limit for long turns (from reading the fork's source, not tested).** The timeout is an
+`AbortSignal.timeout` around the whole upstream call, not an idle timeout, so a single response that
+takes longer than the ceiling is cut off, whether or not it is still streaming. A high-effort Opus
+turn with a large `max_tokens` can plausibly run that long. No request that long was sent here. If
+agent turns fail at about two minutes, raise the setting (600000 is the maximum).
+
+The healthcheck is `GET /healthz`, which needs no token and says the process listens and Pi's model
+runtime loaded. It does not say a login exists (`j5 setup --check` asks `/v1/models` for that).
 
 ## Start and inspect
 
@@ -256,7 +289,7 @@ container to go back to the default.
 
 Treat `@victor-software-house/pi-openai-proxy` as abandoned: 4.9.5 is the latest npm release (published 2026-05-06), the repository's last push was 2026-06-08, and there is no open issue about what we changed. This image runs a build of our fork, [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy), instead. Its PR #1 (merged 2026-10-16) ports the proxy to Pi 1.x (`ModelRuntime` replaces `AuthStorage` and `ModelRegistry.create()`) and fixes `prompt_tokens` at source; PR #2 adds a `chat_request` log line naming the requested and the resolved model of each chat request; PR #3 aligns its docs.
 
-**Updating the proxy build.** In the fork: `pnpm install --frozen-lockfile --ignore-scripts && pnpm pack`, then publish the tarball as a release asset (`gh release create <tag> <tgz> --target <commit>`). Here: point the URL in `package.json` at that asset, delete and regenerate `bun.lock` with `bun install` (Bun 1.4.2), and bump the image tag in `compose.yaml`. The lockfile records the tarball's hash, so the build fails if the asset changes.
+**Updating the proxy build.** Use a GitHub release asset of the fork, built with `pnpm install --frozen-lockfile && pnpm pack`. Here: point the URL in `package.json` at that asset, regenerate `package-lock.json` (`npm install --package-lock-only --ignore-scripts` in this directory; it records the asset's integrity hash), and bump the image tag in `compose.yaml`. The build fails if the asset changes. A tarball packed independently from a clean clone of `dev` had the same sha256 as the fork's release asset (`becd0133…`), so the build is reproducible. The fork's own release workflow (semantic-release on `main`) attaches no tarball, and its package is published to a restricted registry that a public image build cannot read, so until that changes this image uses a pre-release asset such as `v4.9.6-j5.2`.
 
 **Why Pi's version decides which models work.** The Opus 5.5 rejection comes from the client version Pi's Anthropic client sends (`user-agent: claude-cli/<version>`), not from this proxy. Read from the published `@earendil-works/pi-ai` packages (`claudeCodeVersion` in `dist`), checked 2026-10-16:
 
@@ -281,7 +314,7 @@ Both are forks of the same upstream, 0 stars, compared with upstream `main` thro
 - **Both ports match ours.** `ModelRuntime`, `getAvailableSnapshot()`, `getAuth()` for the pre-check, completions through the runtime, and `pending` and `deferred` mapped to `stop`. thomasgauthier forwards `auth.baseUrl` by hand; `ModelRuntime.prepareRequest` already applies it (read in `pi-coding-agent` 1.3.0), so ours needs no such step. Both refresh the registry in the extension before reading it, which the fork's branch now does too.
 - **Neither touches `mapUsage()`.** The cache-token fix is ours alone.
 - **Not adopted: laixintao's CORS.** It answers every `OPTIONS` before proxy auth and reflects any `Origin` with `access-control-allow-credentials: true` and private-network access allowed, on a proxy that fronts a Claude login. The bearer token is still required for real requests, but a browser page could now reach a localhost proxy that upstream refuses by default, and docker-agent is not a browser. Skip it unless a browser client needs it, and then restrict the origins.
-- **Worth taking if we want it: the `chat_request` log line.** It records the requested and the resolved model per request, which is how you would see which model actually served a call. Small and low risk; not added.
+- **The `chat_request` log line is now in the fork.** Its LogTape rewrite logs the requested and the resolved model per request at `info` (see "Logs and settings"); nothing is taken from laixintao's branch.
 
 ### Anthropic's own OpenAI-compatible endpoint
 
@@ -303,15 +336,15 @@ Billing is per token on an API key, not the subscription. Anthropic's recommenda
 ## Share it with the team (maintainers)
 
 **Publishing.** `.github/workflows/proxy-image.yml` runs when a build input changes
-(`Dockerfile`, `.dockerignore`, `package.json`, `bun.lock`) or `compose.yaml`.
+(`Dockerfile`, `.dockerignore`, `package.json`, `package-lock.json`) or `compose.yaml`.
 On a pull request it builds and smoke-tests only. On a push to `main` it also publishes the tag
 named in `compose.yaml`. The smoke test checks that the shipped proxy reports `prompt_tokens_details`,
 that Pi's Anthropic client sends Claude Code 2.1.280 or newer, that the image exits 64 without a
-token, that it answers 401 to a missing or wrong bearer and 200 to the right one, and that it runs
-as UID 1000.
+token, that it answers 401 to a missing or wrong bearer and 200 to the right one, that `/healthz`
+answers 200 with no token, and that it runs as UID 1000.
 
 **Bump the tag when a build input changes.** The last number in the `compose.yaml` image tag
-(`4.9.6-1`) is the revision. CI records a hash of the build inputs in an image label. If the
+(`4.9.6-2`) is the revision. CI records a hash of the build inputs in an image label. If the
 tag is already published from the same inputs it skips quietly, for example after a `compose.yaml`
 edit that is not a bump. If the inputs differ it fails and tells you to bump, because a machine
 that already pulled the old image under that tag would otherwise keep running it with no warning.
@@ -354,11 +387,41 @@ pull after being given Read. Have the first teammate try it and record the resul
 found, GitHub has no REST endpoint for a package's visibility or access, so changing them is a
 settings-page step.
 
-**Never publish a login.** The image is built from `package.json` and `bun.lock`
+**Never publish a login.** The image is built from `package.json` and `package-lock.json`
 only (`.dockerignore` excludes everything else). Do not add `COPY` lines for
 anything under `~/.pi`.
 
 ## Verification receipts
+
+### Node image (`4.9.6-2`), 2026-10-16
+
+Linux amd64, Node 24.22.0, the fork's pre-release `v4.9.6-j5.2` (`dev` at `c4b7350`; asset sha256
+`becd0133…`, equal to a tarball packed independently from a clean clone):
+
+- The image built through `docker compose build` (`npm ci`, 534 MB). Run on an empty volume with the
+  compose hardening flags: `/healthz` 200 with no token, 401 without a token, 200 with it on
+  `/v1/models` (0 models), UID 1000, exit 64 without `PI_PROXY_AUTH_TOKEN`, and the log level and
+  format settings changed what was logged.
+- The same dependencies and base in a throwaway image, on a copy of the existing login: 17 models
+  including Opus 5.5 and Fable 5.1; one request each answered on `claude-opus-5-5`,
+  `claude-fable-5-1`, `claude-haiku-5-5` and `claude-sonnet-5-5`. A ~28k-token prompt wrote the
+  cache on the first call and read it on the second (`prompt_tokens` 27,937 both times,
+  `cached_tokens` 27,933). A streamed request returned usage and `[DONE]`; a tool call on
+  `claude-opus-5-5` returned `get_weather {"city":"Oslo"}`. `/healthz/creds` listed one provider,
+  `anthropic`, type `oauth`, 17 models, and no secret.
+- Pi's terminal UI starts under Node (v1.3.0, "No models available. Use /login"). The login menu
+  itself was not read again under Node.
+
+**Never test with a copy of a live login.** That copy's access token was 7 hours expired, so the
+first request made Pi refresh it and Anthropic replaced the refresh token too. The live proxy's copy
+of the old refresh token was then useless. It was repaired by moving the new `auth.json` into the
+live volume and restarting the proxy (4 of 4 requests then answered), but whether the new refresh
+token survives is only known at the next refresh. Test against an empty volume, or read the
+login's `expires` first and stop if it is within a day.
+
+Not verified: this image on the live proxy (still on `4.9.6-1`, Bun); completing a login or a token
+refresh under Node; Docker Agent teams against it; long turns against the upstream timeout; the
+arm64 build (CI builds it).
 
 ### Pi 1.x image (`4.9.6-1`), 2026-10-16
 

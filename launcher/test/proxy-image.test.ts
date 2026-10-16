@@ -27,6 +27,17 @@ function packageRootWithCompose(composeText: string | undefined): string {
   }
   return packageRoot;
 }
+/** A Docker stand-in that answers `docker ps` and `docker inspect` and records every call. */
+function dockerAnswering(containerIds: string, inspectedImages: string) {
+  const asked: string[][] = [];
+  const runner = (commandWords: string[]) => {
+    asked.push(commandWords);
+    return commandWords[1] === "ps"
+      ? { exitCode: 0, standardOutput: containerIds }
+      : { exitCode: 0, standardOutput: inspectedImages };
+  };
+  return { asked, runner };
+}
 
 describe("judgeProxyImage", () => {
   test("the pinned image running is current", () => {
@@ -76,19 +87,37 @@ describe("checkProxyImage", () => {
   const composeText = `name: some-project\nservices:\n  proxy:\n    image: ${EXPECTED}\n`;
 
   // Catches looking up the wrong container: the labels come from the compose file's own project
-  // name, so a renamed project keeps working.
-  test("asks Docker for the proxy service of the compose file's own project", () => {
-    const asked: string[][] = [];
+  // name, so a renamed project keeps working. And catches reading the name from `docker ps`,
+  // which prints an image ID when the store cannot map the image back to a name: here `ps` only
+  // ever yields a container ID, and the name must come from `inspect`.
+  test("finds the proxy container by the compose file's project and reads its image from inspect", () => {
+    const docker = dockerAnswering("abc123def456\n", `${EXPECTED}\n`);
 
-    const status = checkProxyImage(packageRootWithCompose(composeText), (commandWords) => {
-      asked.push(commandWords);
-      return { exitCode: 0, standardOutput: `${EXPECTED}\n` };
-    });
+    const status = checkProxyImage(packageRootWithCompose(composeText), docker.runner);
 
     expect(status).toEqual({ kind: "current", image: EXPECTED });
-    expect(asked).toHaveLength(1);
-    expect(asked[0]).toContain("label=com.docker.compose.project=some-project");
-    expect(asked[0]).toContain("label=com.docker.compose.service=proxy");
+    expect(docker.asked).toHaveLength(2);
+    expect(docker.asked[0]).toContain("label=com.docker.compose.project=some-project");
+    expect(docker.asked[0]).toContain("label=com.docker.compose.service=proxy");
+    expect(docker.asked[1]).toEqual([
+      "docker",
+      "inspect",
+      "--format",
+      "{{.Config.Image}}",
+      "abc123def456",
+    ]);
+  });
+
+  test("a container created from an older tag is different", () => {
+    const docker = dockerAnswering("abc123def456\n", "j5-pi-openai-proxy:4.9.5\n");
+
+    const status = checkProxyImage(packageRootWithCompose(composeText), docker.runner);
+
+    expect(status).toEqual({
+      kind: "different",
+      expectedImage: EXPECTED,
+      runningImages: ["j5-pi-openai-proxy:4.9.5"],
+    });
   });
 
   // Catches a launch failing or warning because Docker is missing, stopped or refusing.
@@ -97,6 +126,27 @@ describe("checkProxyImage", () => {
       exitCode: 127,
       standardOutput: "",
     }));
+
+    expect(status).toEqual({ kind: "unknown" });
+  });
+
+  // Catches asking `docker inspect` with no ids, which inspects nothing and fails noisily, and a
+  // machine without the proxy being told something about it.
+  test("no proxy container is unknown and nothing is inspected", () => {
+    const docker = dockerAnswering("\n", "");
+
+    const status = checkProxyImage(packageRootWithCompose(composeText), docker.runner);
+
+    expect(status).toEqual({ kind: "unknown" });
+    expect(docker.asked).toHaveLength(1);
+  });
+
+  test("a failing inspect is unknown, not a mismatch", () => {
+    const status = checkProxyImage(packageRootWithCompose(composeText), (commandWords) =>
+      commandWords[1] === "ps"
+        ? { exitCode: 0, standardOutput: "abc123def456\n" }
+        : { exitCode: 1, standardOutput: "" },
+    );
 
     expect(status).toEqual({ kind: "unknown" });
   });
