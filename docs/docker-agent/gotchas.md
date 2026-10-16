@@ -241,8 +241,20 @@ volume, so there was still one `auth.json`), failed the same way with
 `version 2.1.251 or newer is required`.
 
 **Consequence:** the proxy's `models.json` does not list Opus 5.5 or Fable 5.1. issue-team's
-builders run on Sonnet 5.5 and its reviewer on Opus 4.7, the newest Opus that works. Not tried:
-a newer Pi release, which presents a newer client version and may unlock them.
+builders run on Sonnet 5.5 and its reviewer on Opus 4.7, the newest Opus that works.
+
+**A newer Pi clears it (tried 2026-10-16).** The version in the error is the one Pi's Anthropic
+client sends, `user-agent: claude-cli/<claudeCodeVersion>`, a constant in
+`@earendil-works/pi-ai`. Reading that constant from the published packages: 0.75.0 to 0.84.4
+send 2.1.75, 0.85.0 and 0.86.0 send 2.1.251, 1.0.0 to 1.3.0 send 2.1.280. A container built from
+the fork's Pi 1.3.0 branch (a copy of the existing login in a throwaway volume, one request each)
+answered `OK` on `claude-opus-5-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`,
+`claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-5-5` and `claude-haiku-5-5`; Opus 5.5 also
+passed a streamed request with usage and a tool call. Those probe requests used the repo's
+hand-written catalogue entries for the 5.5 models, so they took the legacy token-budget thinking
+path, not Pi 1.x's adaptive effort. Not tried: Fable on Pi 0.85.x (its floor
+is 2.1.251, so it should work there; inference), a long run, or token refresh under Pi 1.x.
+Details and the other forks reviewed: [proxy README](../../containers/pi-openai-proxy/README.md#upstream-status-and-the-fork).
 
 ### `docker agent debug config` takes `--flavor` but not `--model`
 

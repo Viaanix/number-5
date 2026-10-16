@@ -203,7 +203,51 @@ token counter accumulating in the Docker Agent sidebar.
 
 Treat `@victor-software-house/pi-openai-proxy` as abandoned: 4.9.5 is the latest release (published 2026-05-06), the repository's last push was 2026-06-08, and there is no open issue about what we patch. We keep it pinned and carry small build-time patches (`patch-usage.ts`), each of which fails the build if the package stops matching.
 
-A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy), unchanged from upstream so far. **Revisit and switch to it once we need more than a few fixes**, or one that does not fit a build-time patch. A fork does not change the Opus 5.5 rejection, which comes from Pi's client identity and not from this proxy.
+A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy). Its [PR #1](https://github.com/vx-daniel/pi-openai-proxy/pull/1), merged 2026-10-16, ports the proxy to Pi 1.x (`ModelRuntime` replaces `AuthStorage` and `ModelRegistry.create()`) and fixes `prompt_tokens` at source, which replaces `patch-usage.ts`. **This image does not use it yet**: it still installs 4.9.5 from npm, and switching means publishing the fork, re-testing the live login under Pi 1.x, and trimming `models.json` (see the note under the table).
+
+**Why Pi's version decides which models work.** The Opus 5.5 rejection comes from the client version Pi's Anthropic client sends (`user-agent: claude-cli/<version>`), not from this proxy. Read from the published `@earendil-works/pi-ai` packages (`claudeCodeVersion` in `dist`), checked 2026-10-16:
+
+| `pi-ai` release | Sends | Serves |
+|---|---|---|
+| 0.75.0 to 0.84.4 (0.75.0, 0.80.9, 0.84.0, 0.84.3, 0.84.4 read) | 2.1.75 | Not Opus 5.5, not Fable 5.1 |
+| 0.85.0 to 0.86.0 (both read) | 2.1.251 | Fable 5.1's floor is 2.1.251 (from Anthropic's error message); not tried on these releases |
+| 1.0.0 to 1.3.0 (1.0.0, 1.1.0, 1.2.0, 1.3.0 read) | 2.1.280 | Opus 5.5 and Fable 5.1 answered through a container built from the fork's Pi 1.x branch, 2026-10-16 |
+
+Releases between the ones listed were not read. Anthropic's errors named 2.1.280 for Opus 5.5 and 2.1.251 for Fable 5.1 ([gotcha](../../docs/docker-agent/gotchas.md#opus-55-is-rejected-for-the-pi-proxys-subscription-login)).
+
+**Those probe requests used our hand-written `models.json` entries**, which replace Pi's built-in definitions and send the legacy token-budget form of thinking instead of adaptive effort. Pi 1.x already knows `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1`, so the image should stop listing them when it moves to Pi 1.x. The request bodies each setup sends are in the gotchas, in the entry about `models.json` added with the `--model`/`--effort` flavors.
+
+### Other forks reviewed (2026-10-16)
+
+Both are forks of the same upstream, 0 stars, compared with upstream `main` through GitHub's compare API.
+
+| Fork | Ahead of upstream | What it adds | Pi it targets |
+|---|---|---|---|
+| [`laixintao/pi-openai-proxy`](https://github.com/laixintao/pi-openai-proxy) | 3 | Port to Pi 0.84.3; a `chat_request` log line naming the model a request resolved to; CORS preflight handling | 0.84.3 |
+| [`thomasgauthier/pi-openai-proxy`](https://github.com/thomasgauthier/pi-openai-proxy) | 2 | Port through every Pi release 0.74 to 0.84.1, with a migration log (`PI-MIGRATION-LOG.md`) | 0.84.1 |
+
+- **Neither unlocks the new models.** Both stop at Pi 0.84.x, which sends 2.1.75.
+- **Both ports match ours.** `ModelRuntime`, `getAvailableSnapshot()`, `getAuth()` for the pre-check, completions through the runtime, and `pending` and `deferred` mapped to `stop`. thomasgauthier forwards `auth.baseUrl` by hand; `ModelRuntime.prepareRequest` already applies it (read in `pi-coding-agent` 1.3.0), so ours needs no such step. Both refresh the registry in the extension before reading it, which the fork's branch now does too.
+- **Neither touches `mapUsage()`.** The cache-token fix is ours alone.
+- **Not adopted: laixintao's CORS.** It answers every `OPTIONS` before proxy auth and reflects any `Origin` with `access-control-allow-credentials: true` and private-network access allowed, on a proxy that fronts a Claude login. The bearer token is still required for real requests, but a browser page could now reach a localhost proxy that upstream refuses by default, and docker-agent is not a browser. Skip it unless a browser client needs it, and then restrict the origins.
+- **Worth taking if we want it: the `chat_request` log line.** It records the requested and the resolved model per request, which is how you would see which model actually served a call. Small and low risk; not added.
+
+### Anthropic's own OpenAI-compatible endpoint
+
+Anthropic documents an official OpenAI-compatible endpoint, `https://api.anthropic.com/v1/`, used with a Claude **API key** ([OpenAI SDK compatibility](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk), read 2026-10-16). It would need no Pi, no proxy and no client-version check, and docker-agent can point at it as a custom OpenAI-compatible endpoint. It is a different trade, not a drop-in: none of this was tested here (we have no API key for it), and every row below is Anthropic's statement.
+
+| Our use | The endpoint |
+|---|---|
+| `reasoning_effort` (the `--effort` flavors) | **Ignored.** Thinking is set with a `thinking` field instead; Claude 5 models think adaptively by default. The `effort-*` flavors would change nothing there. |
+| Prompt caching | **Not supported** (only in the native API and SDKs). Every request is billed as fresh input, and `usage.prompt_tokens_details` is always empty. |
+| `tool_choice` `required` or a named tool | Errors on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1; `auto` works. |
+| `strict` tool schemas | Ignored. |
+| System and developer messages | Hoisted and joined into one top-level `system` field. |
+| `temperature`, `top_p` | A 400 for values other than the default on Claude 4.7 and later; omit them. |
+| Thinking output | Not returned. |
+| Status | Anthropic calls it "primarily intended to test and compare model capabilities", "not considered a long-term or production-ready solution for most use cases". |
+
+Billing is per token on an API key, not the subscription. Anthropic's recommendation for the full feature set is the native Claude API, which docker-agent's own `anthropic` provider uses; that route was not tried here either.
 
 ## Share it with the team (maintainers)
 
