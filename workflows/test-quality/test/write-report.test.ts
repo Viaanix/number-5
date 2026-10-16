@@ -90,10 +90,14 @@ describe("test-quality-write-report", () => {
     const result = runWriteReport(projectRoot, "# Audit\nS1 finding\n");
     expect(result.exitCode).toBe(0);
     const writtenPath = result.standardOutput.trim();
-    // The helper prints the path of its real working directory; macOS temporary directories sit
-    // behind a symlink (/var -> /private/var), so compare against the canonical form.
+    // Compare canonical forms: macOS temporary directories sit behind a symlink
+    // (/var -> /private/var) and Windows ones can use 8.3 short names, and the helper prints
+    // its working directory in whichever form the OS reports. Neither equals what
+    // createTemporaryDirectory returned.
     const canonicalProjectRoot = realpathSync.native(projectRoot);
-    expect(writtenPath.startsWith(join(canonicalProjectRoot, ".j5", "review"))).toBe(true);
+    expect(
+      realpathSync.native(writtenPath).startsWith(join(canonicalProjectRoot, ".j5", "review")),
+    ).toBe(true);
     expect(writtenPath).toMatch(TODAY_PATTERN);
     expect(readFileSync(writtenPath, "utf8")).toBe("# Audit\nS1 finding\n");
   });
