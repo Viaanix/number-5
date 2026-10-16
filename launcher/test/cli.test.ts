@@ -264,20 +264,34 @@ const TERMINAL_RUN_TIMEOUT_MILLISECONDS = 3000;
 // Wide enough that the printed command never wraps.
 const TERMINAL_COLUMNS = 400;
 const TERMINAL_ROWS = 50;
+// A pseudo-terminal delivers its output asynchronously, and on Windows (ConPTY) text written
+// just before the process exits can reach the reader after `exited` resolves. A caller that
+// reads output of a run that ends by itself passes the text it expects; the run then waits for
+// that text to arrive. This bound only ends the wait when it never does (the caller's own
+// assertion then fails with what the screen held), so a passing run never waits for it.
+const TERMINAL_OUTPUT_BOUND_MILLISECONDS = 2000;
 
 type TerminalRunResult = { exitCode: number; timedOut: boolean; screenText: string };
 
 async function runCliInTerminal(
   cliArguments: string[],
   workingDirectory: string,
+  expectedOutput?: string,
 ): Promise<TerminalRunResult> {
   const decoder = new TextDecoder();
   let rawScreen = "";
+  const expectedOutputSeen = Promise.withResolvers<void>();
   await using terminal = new Bun.Terminal({
     cols: TERMINAL_COLUMNS,
     rows: TERMINAL_ROWS,
     data(_terminal, data) {
       rawScreen += decoder.decode(data);
+      if (
+        expectedOutput !== undefined &&
+        stripVTControlCharacters(rawScreen).replaceAll("\r", "").includes(expectedOutput)
+      ) {
+        expectedOutputSeen.resolve();
+      }
     },
   });
   const childProcess = Bun.spawn(["bun", CLI_PATH, ...cliArguments], {
@@ -292,6 +306,11 @@ async function runCliInTerminal(
   }, TERMINAL_RUN_TIMEOUT_MILLISECONDS);
   const exitCode = await childProcess.exited;
   clearTimeout(timer);
+  if (expectedOutput !== undefined) {
+    const giveUpTimer = setTimeout(expectedOutputSeen.resolve, TERMINAL_OUTPUT_BOUND_MILLISECONDS);
+    await expectedOutputSeen.promise;
+    clearTimeout(giveUpTimer);
+  }
   return {
     exitCode,
     timedOut,
@@ -349,6 +368,8 @@ describe("j5 in a terminal", () => {
     const subdirectory = join(projectRoot, "src", "deep");
     mkdirSync(subdirectory, { recursive: true });
     // Every other value is a flag, so the project is the only thing left to ask about.
+    // The worktree is added from the repository root, not the subdirectory j5 started in.
+    const expectedWorktreeStep = `-C ${quoteForThisPlatform(canonicalPath(projectRoot))} worktree add -b worktree-terminal-app-issue-12`;
     const result = await runCliInTerminal(
       [
         "issue-team",
@@ -362,13 +383,11 @@ describe("j5 in a terminal", () => {
         "--print",
       ],
       subdirectory,
+      expectedWorktreeStep,
     );
     expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
-    // The worktree is added from the repository root, not the subdirectory j5 started in.
-    expect(result.screenText).toContain(
-      `-C ${quoteForThisPlatform(canonicalPath(projectRoot))} worktree add -b worktree-terminal-app-issue-12`,
-    );
+    expect(result.screenText).toContain(expectedWorktreeStep);
   });
 });
 
