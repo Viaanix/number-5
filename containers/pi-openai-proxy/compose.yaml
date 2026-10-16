@@ -25,8 +25,9 @@ services:
       # when nothing sets it. A default written here would always set the variable, and in the fork
       # an environment variable beats `proxy-config.json`, so `logLevel` and `upstreamTimeoutSec`
       # in that file could never take effect. With nothing set the fork uses its own defaults:
-      # `info`, JSON lines when there is no terminal, a 120 s ceiling on one whole upstream
-      # request, and UTC (set TZ for local time in `pretty` logs).
+      # `info`, JSON lines when there is no terminal, a 120 s limit on how long the provider may
+      # send nothing upstream (an idle timeout, not a cap on the call), and UTC (set TZ for local
+      # time in `pretty` logs).
       PI_PROXY_LOG_LEVEL:
       PI_PROXY_LOG_FORMAT:
       PI_PROXY_UPSTREAM_TIMEOUT_MS:

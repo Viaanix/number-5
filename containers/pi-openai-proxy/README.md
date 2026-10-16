@@ -10,10 +10,11 @@ credential handling. This does not change the existing Claude Code harness workf
 - Node 24.22.0 (`node:24.22.0-bookworm-slim`), pinned by multi-platform digest. The fork moved from
   Bun to Node; the earlier images ran Bun 1.4.2.
 - The proxy: a build of the fork [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy)
-  (pre-release `v4.9.6-j5.2`, fork `dev` at `c4b7350`): upstream 4.9.6 plus the Pi 1.x port, the
-  `prompt_tokens` fix, LogTape logging with a `/healthz` endpoint and a log level and format setting.
-  It is installed from the release asset URL in `package.json`, and `package-lock.json` records the
-  tarball's integrity hash (the asset's sha256 is `becd0133a688846a6e8b3a393da02f022227d6d663b02155f975d1b6c4ac872a`).
+  (pre-release `v4.9.6-j5.3`, fork `dev` at `7664589`): upstream 4.9.6 plus the Pi 1.x port, the
+  `prompt_tokens` fix, LogTape logging with a `/healthz` endpoint, a log level and format setting,
+  and an idle (not total) upstream timeout. It is installed from the release asset URL in
+  `package.json`, and `package-lock.json` records the tarball's integrity hash (the asset's sha256 is
+  `c793f174cec0e2671d8284ee6834cedb1340aa5dc53e3ec306949b6e26c0c941`).
 - Pi 1.3.0 (`@earendil-works/pi-ai`, `pi-coding-agent`, `pi-tui`): the model adapter and the CLI used
   for subscription login. Its Anthropic client identifies as Claude Code 2.1.280.
 - Every resolved dependency is recorded in `package-lock.json`; builds use `npm ci` and do not
@@ -166,7 +167,7 @@ empty string, which the fork would warn about at every start).
 |---|---|---|
 | `PI_PROXY_LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warning`, `error` or `fatal`. An invalid value is ignored with a warning. Checked: `debug` adds debug lines. |
 | `PI_PROXY_LOG_FORMAT` | JSON lines (the fork's default without a terminal) | `pretty` prints lines for reading `docker compose logs` by eye. Checked with `pretty`. |
-| `PI_PROXY_UPSTREAM_TIMEOUT_MS` | 120000 | A hard ceiling on one whole upstream request, in milliseconds; the fork's config allows 5 to 600 seconds (600000 is the maximum). Checked: the container honors it. |
+| `PI_PROXY_UPSTREAM_TIMEOUT_MS` | 120000 | An **idle** timeout: how long the provider may send nothing, in milliseconds. It restarts on every upstream event. The fork's config allows 5 to 600 seconds. Checked: the container honors it (next paragraphs). |
 | `TZ` | UTC | The time zone `pretty` logs print in, for example `TZ=America/Chicago`. Checked: `new Date()` in the image reports Central time with it set and UTC without. JSON lines keep a UTC `@timestamp` either way. |
 
 `j5 setup` hands `~/.config/cagent/.env` to Compose only when the token comes from that file. If you
@@ -174,25 +175,29 @@ export the token in your shell instead, export these there too. docker-agent als
 so a `TZ` there may reach its tools as well (not checked); set it in the shell instead if you only
 want it for the proxy.
 
-**The timeout counts wall-clock time, not silence (measured 2026-10-16, image `4.9.6-2`).** It is an
-`AbortSignal.timeout` created when the request starts; it never resets. With the setting at its 5 s
-minimum, on the same prompts:
+**The timeout is an idle timeout (build `v4.9.6-j5.3`; measured 2026-10-16, image `4.9.6-2`).** The
+previous build, `v4.9.6-j5.2`, counted the whole call: at the 5 s minimum it cut a streaming essay
+while 223 chunks were flowing, and a silent thinking phase, both at exactly 5.0 s, and an Opus 5.5
+`xhigh` turn takes about 66 s, so the 120 s default would have cut any turn above roughly 14,000
+tokens (the teams allow up to 32,768). The timer now restarts on every upstream event.
 
-| Request | Result at 5 s |
-|---|---|
-| Haiku, ~1,000-word essay, not streamed | HTTP 502 `Upstream provider error`, nothing returned |
-| Haiku, same, streamed | Text was arriving (223 chunks, first at 0.5 s); cut at 5.0 s with HTTP 200 already sent, then an error event `This operation was aborted` (`upstream_error`) and `[DONE]` |
-| Opus 5.5 at `xhigh`, a reasoning puzzle, not streamed | HTTP 502 at 5.0 s |
-| Same, streamed | No content chunk ever arrived (the model was thinking); the same error event at 5.0 s |
+- **How long Anthropic is silent during thinking.** With `PI_PROXY_LOG_LEVEL=trace`, one streamed
+  Opus 5.5 `xhigh` turn (65.6 s) logged 397 upstream events. Thinking arrives as `thinking_delta`
+  events, the first event came after 0.8 s, the median gap was 49 ms, and the **largest gap was
+  4.0 s**. The 120 s default is about thirty times that. One turn was measured, so a much longer
+  one may differ.
+- **Long but steady responses survive a 5 s limit.** The same prompts that were cut at 5.0 s now
+  finish: the Haiku essay in 10.0 s (not streamed) and 10.3 s (streamed, 487 chunks), the Opus
+  `xhigh` puzzle in 32.7 s streamed and 70.4 s not streamed.
+- **A real stall is cut, and the failure has two shapes.** With the limit at 5 s, the container's
+  network was cut 3 s into a request, so the upstream connection went silent. Not streamed: HTTP 504
+  after 8.0 s, body `{"error":{"message":"Upstream request timed out","type":"server_error","param":null,"code":"timeout"}}`.
+  Streamed: HTTP 200 was already sent and the text that had arrived stays delivered, then
+  `data: {"error":{"message":"Upstream timeout: the provider sent nothing for 5 s","type":"server_error","param":null,"code":"upstream_error"}}`
+  and `data: [DONE]`. Not tested: what Docker Agent does with that error event.
 
-So thinking time, a silent wait and active streaming all count. With the default 120 s the same
-requests completed: the essay in 10.5 s, and the Opus `xhigh` puzzle in 69.4 s (66.4 s streamed),
-having spent all 8,000 `max_tokens` on thinking with no visible text. That is about 115 tokens a
-second, so 120 s is roughly 14,000 tokens of one response at that rate. The teams set `max_tokens`
-to 16,384 or 32,768, and 32,768 tokens would take about 280 s. A single turn that uses most of its
-budget, a deep `xhigh` reasoning step or a large file written in one call, would be cut off at the
-default. Not tested: a real agent turn that long, and what Docker Agent does with the in-stream
-error event. The maximum is 600000 (10 minutes).
+So the default needs no raising. The maximum is 600000 (10 minutes), which would only let a stalled
+connection hang that long.
 
 The healthcheck is `GET /healthz`, which needs no token and says the process listens and Pi's model
 runtime loaded. It does not say a login exists (`j5 setup --check` asks `/v1/models` for that).
@@ -419,8 +424,8 @@ anything under `~/.pi`.
 
 ### Node image (`4.9.6-2`), 2026-10-16
 
-Linux amd64, Node 24.22.0, the fork's pre-release `v4.9.6-j5.2` (`dev` at `c4b7350`; asset sha256
-`becd0133…`, equal to a tarball packed independently from a clean clone):
+Linux amd64, Node 24.22.0, the fork's pre-release `v4.9.6-j5.3` (`dev` at `7664589`; asset sha256
+`c793f174…`, equal to the release's recorded hash and to a tarball packed independently from a clean clone):
 
 - The image built through `docker compose build` (`npm ci`, 534 MB). Run on an empty volume with the
   compose hardening flags: `/healthz` 200 with no token, 401 without a token, 200 with it on
@@ -443,8 +448,13 @@ live volume and restarting the proxy (4 of 4 requests then answered), but whethe
 token survives is only known at the next refresh. Test against an empty volume, or read the
 login's `expires` first and stop if it is within a day.
 
-Not verified: this image on the live proxy (still on `4.9.6-1`, Bun); completing a login or a token
-refresh under Node; Docker Agent teams against it; the arm64 build (CI builds it).
+The image was then running on the live proxy (recreated 15:33 UTC): it is
+healthy, serves 17 models, `claude-opus-5-5` answers, and `GET /healthz/creds?verify=true` returns
+`verified: true`. That verifies the current access token; the rotated refresh token is still only
+proven at the next refresh (about 22:30 UTC).
+
+Not verified: completing a login or a token refresh under Node; Docker Agent teams against this
+image; the arm64 build (CI builds it).
 
 ### Pi 1.x image (`4.9.6-1`), 2026-10-16
 
