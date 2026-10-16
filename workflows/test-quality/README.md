@@ -51,12 +51,14 @@ Verified with `docker agent debug toolsets team.yaml`: that list is what each ag
 
 ### Models
 
-| Agent | Model | Effort | `low` flavor |
+| Agent | Default model | Default effort | Under `--model <tier>` |
 |---|---|---|---|
-| `auditor`, `reviewer` | `claude-opus-4-7` | high | `claude-sonnet-5-5`, high |
-| `writer`, `fixer`, `reader` | `claude-sonnet-5-5` | high | `claude-haiku-5-5`, medium |
+| `auditor`, `reviewer` | `claude-opus-4-7` | high | the tier's model |
+| `writer`, `fixer`, `reader` | `claude-sonnet-5-5` | high | the tier's model |
 
-These roles used Opus 5.5 under the old Claude Code harness. `claude-opus-5-5` is not usable through the proxy: Anthropic answers "Claude Code 2.1.75 does not support this model; version 2.1.280/2.1.251 or newer is required" to Pi's login (observed 2026-10-15, docker-agent v1.145.0), so the two judgment roles run on `claude-opus-4-7`, the newest Opus the proxy serves. The `low` efforts are the ones `issue-team`'s `low` flavor uses for the same tiers.
+`--model` puts **all five** agents on one tier, which the defaults deliberately do not (judgment roles above, writing roles below); `--effort` sets every agent's reasoning effort. Both come from the standard flavors generated into `team.yaml` from `workflows/flavors.yaml` (`bun run flavors`). The old `low` flavor, a hand-written step down one tier per role, is gone: to get it, pass `--model sonnet` (the auditor and reviewer then stay at Sonnet, as `low` did, but the writing roles move up to Sonnet instead of down to Haiku).
+
+These roles used Opus 5.5 under the old Claude Code harness. `claude-opus-5-5` is not usable through the proxy: Anthropic answers "Claude Code 2.1.75 does not support this model; version 2.1.280/2.1.251 or newer is required" to Pi's login (observed 2026-10-15, docker-agent v1.145.0), so the two judgment roles run on `claude-opus-4-7`, the newest Opus the proxy serves.
 
 ### Helpers
 
@@ -84,7 +86,7 @@ The first two wrap `launcher/src/test-prescreen.ts` and `launcher/src/change-dif
 
 2026-10-15, docker-agent v1.145.0, on the machine that built this:
 
-- `docker agent debug config team.yaml` and `… --flavor low` parse; no agent has a `harness:` key; each agent's model resolves to the one in the table above in both.
+- `docker agent debug config team.yaml` and with each `--flavor model-<tier>` / `effort-<level>` parse; no agent has a `harness:` key; `bun run validate:teams` confirms each flavor does what its name says.
 - `docker agent debug toolsets team.yaml` lists the tools in the table above.
 - `PI_PROXY_AUTH_TOKEN=placeholder docker agent run team.yaml --agent <auditor|reviewer|writer|fixer> --dry-run --exec x`, with `bin/` on `PATH`, initialises each agent.
 - `j5 test-quality audit --target … --print` builds the command with the one-sentence task.
@@ -93,7 +95,7 @@ The first two wrap `launcher/src/test-prescreen.ts` and `launcher/src/change-dif
 ## Not verified
 
 - No live model run of any entry point: no agent has talked to the proxy since the conversion from the Claude Code harness. Whether the models follow the instructions (transfer_task to `reader` with the verbatim template, the verdict template, mutation-then-restore) is untested.
-- That Opus 4.7 and Sonnet 5.5 accept every request these agents send through the proxy (the `reasoning_effort` values are copied from `issue-team`; the `low` flavor's Haiku 5.5 was not tried).
+- That every request these agents send is accepted on Opus 4.7, Sonnet 5.5 and Haiku 5.5 at every effort: one tiny request per tier/effort combination was accepted (`low`, `medium`, `high`, `xhigh`; `max` is rejected), not a real agent run.
 - That the permission `deny` patterns match as intended inside a live run (only parsed).
 - That a 30,000-character report passes through the environment on Windows.
 - The earlier harness-era check of `review-branch` (2026-10-14) does not carry over.

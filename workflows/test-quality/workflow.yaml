@@ -12,6 +12,10 @@ description: Audit, review, write or fix tests with the j5-test-quality skill, i
 team: team.yaml
 # The agents' script tools call the helpers in bin/ by bare name.
 path: [bin]
+# The named models (keys under `models:` in team.yaml) that --model and --effort change. The
+# flavors themselves are generated into team.yaml: `bun run flavors`.
+flavors:
+  models: [auditor_model, reviewer_model, writer_model, fixer_model, reader_model]
 
 entrypoints:
   audit:

@@ -252,37 +252,137 @@ permissions:
     - "shell:cmd=*gh repo delete*"
     - "shell:cmd=*gh release*"
 
-# Effort levels, chosen with `j5 test-quality ... --effort <name>` (docker agent run
-# --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
-# the file as written (auditor and reviewer on Opus 4.7, writer, fixer and reader on
-# Sonnet 5.5, all at effort high). `low` steps each model down a tier: Opus to Sonnet 5.5
-# at high (the effort issue-team gives a Sonnet-tier model), Sonnet to Haiku 5.5 at medium.
-# docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
+# Launch options, chosen with `j5 test-quality ... --model <tier> --effort <level>`: standard
+# flavors defined once in workflows/flavors.yaml and written into the block below by
+# `bun run flavors`. `flavors.models` in workflow.yaml lists the models they change (all five
+# here; --model puts all of them on one tier, which the file as written does not: the auditor and
+# reviewer are on Opus 4.7, the writer, fixer and reader on Sonnet 5.5, all at effort high).
+# docker-agent ignores an unknown --flavor silently; j5 rejects names the team does not define.
+# BEGIN GENERATED FLAVORS: written by `bun run flavors` from workflows/flavors.yaml and the
+# `flavors:` block of workflow.yaml. Edit those, not this block.
 flavors:
-  low:
+  model-haiku:
+    models:
+      auditor_model:
+        model: claude-haiku-5-5
+      reviewer_model:
+        model: claude-haiku-5-5
+      writer_model:
+        model: claude-haiku-5-5
+      fixer_model:
+        model: claude-haiku-5-5
+      reader_model:
+        model: claude-haiku-5-5
+  model-sonnet:
     models:
       auditor_model:
         model: claude-sonnet-5-5
-        provider_opts:
-          extra_body:
-            reasoning_effort: high
       reviewer_model:
         model: claude-sonnet-5-5
+      writer_model:
+        model: claude-sonnet-5-5
+      fixer_model:
+        model: claude-sonnet-5-5
+      reader_model:
+        model: claude-sonnet-5-5
+  model-opus:
+    models:
+      auditor_model:
+        model: claude-opus-4-7
+      reviewer_model:
+        model: claude-opus-4-7
+      writer_model:
+        model: claude-opus-4-7
+      fixer_model:
+        model: claude-opus-4-7
+      reader_model:
+        model: claude-opus-4-7
+  effort-low:
+    models:
+      auditor_model:
         provider_opts:
           extra_body:
-            reasoning_effort: high
+            reasoning_effort: low
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
       writer_model:
-        model: claude-haiku-5-5
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      fixer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      reader_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+  effort-medium:
+    models:
+      auditor_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      writer_model:
         provider_opts:
           extra_body:
             reasoning_effort: medium
       fixer_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
       reader_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
+  effort-high:
+    models:
+      auditor_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      writer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      fixer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      reader_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+  effort-xhigh:
+    models:
+      auditor_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      writer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      fixer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      reader_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+# END GENERATED FLAVORS

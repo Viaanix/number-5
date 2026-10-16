@@ -20,12 +20,28 @@ export type DockerAgentResult = { exitCode: number; standardOutput: string; stan
 export type DockerAgentRunner = (dockerAgentArguments: string[]) => DockerAgentResult;
 
 // Loose objects: the resolved config carries many fields this does not read.
-const modelReferenceSchema = z.looseObject({ model: z.string().optional() });
+const agentSchema = z.looseObject({ model: z.string().optional() });
+const namedModelSchema = z.looseObject({
+  model: z.string().optional(),
+  provider_opts: z
+    .looseObject({
+      extra_body: z.looseObject({ reasoning_effort: z.string().optional() }).optional(),
+    })
+    .optional(),
+});
 
 const resolvedConfigSchema = z.object({
-  agents: z.record(z.string(), modelReferenceSchema),
-  models: z.record(z.string(), modelReferenceSchema).default({}),
+  agents: z.record(z.string(), agentSchema),
+  models: z.record(z.string(), namedModelSchema).default({}),
 });
+
+type ResolvedConfig = z.infer<typeof resolvedConfigSchema>;
+
+/** What a named entry under `models:` resolves to once flavors are applied. */
+export type NamedModelSettings = {
+  modelId: string | undefined;
+  reasoningEffort: string | undefined;
+};
 
 /** The real `docker agent`, run in the team's directory. */
 export function createDockerAgentRunner(workingDirectory: string): DockerAgentRunner {
@@ -52,18 +68,11 @@ export function createDockerAgentRunner(workingDirectory: string): DockerAgentRu
   };
 }
 
-/**
- * Returns the model id each agent that has a model runs on, with the flavors applied in order.
- * A named model (`builder_model`) is followed to its `model:` field; an inline reference
- * (`anthropic/claude-sonnet-5-5`) is used as written. Agents without a model (a Claude Code
- * harness agent has none) are left out.
- * @throws Error with docker-agent's own output when it rejects the config.
- */
-export function resolveAgentModels(
+function readResolvedConfig(
   teamConfigPath: string,
   flavorNames: string[],
   runDockerAgent: DockerAgentRunner,
-): AgentModelIds {
+): ResolvedConfig {
   const flavorArguments = flavorNames.flatMap((flavorName) => ["--flavor", flavorName]);
   const result = runDockerAgent(["debug", "config", teamConfigPath, ...flavorArguments]);
   if (result.exitCode !== SUCCESS_EXIT_CODE) {
@@ -79,12 +88,47 @@ export function resolveAgentModels(
       `docker agent debug config ${teamConfigPath}: unexpected output\n${z.prettifyError(parsed.error)}`,
     );
   }
+  return parsed.data;
+}
+
+/**
+ * Returns the model id each agent that has a model runs on, with the flavors applied in order.
+ * A named model (`builder_model`) is followed to its `model:` field; an inline reference
+ * (`anthropic/claude-sonnet-5-5`) is used as written. Agents without a model (a Claude Code
+ * harness agent has none) are left out.
+ * @throws Error with docker-agent's own output when it rejects the config.
+ */
+export function resolveAgentModels(
+  teamConfigPath: string,
+  flavorNames: string[],
+  runDockerAgent: DockerAgentRunner,
+): AgentModelIds {
+  const { agents, models } = readResolvedConfig(teamConfigPath, flavorNames, runDockerAgent);
   const agentModelIds: AgentModelIds = {};
-  for (const [agentName, agent] of Object.entries(parsed.data.agents)) {
+  for (const [agentName, agent] of Object.entries(agents)) {
     if (agent.model === undefined) {
       continue;
     }
-    agentModelIds[agentName] = parsed.data.models[agent.model]?.model ?? agent.model;
+    agentModelIds[agentName] = models[agent.model]?.model ?? agent.model;
   }
   return agentModelIds;
+}
+
+/**
+ * Returns the model id and reasoning effort of every named entry under `models:`, with the
+ * flavors applied in order. This is what a launch option really changed, whichever agents use it.
+ * @throws Error with docker-agent's own output when it rejects the config.
+ */
+export function resolveNamedModels(
+  teamConfigPath: string,
+  flavorNames: string[],
+  runDockerAgent: DockerAgentRunner,
+): Record<string, NamedModelSettings> {
+  const { models } = readResolvedConfig(teamConfigPath, flavorNames, runDockerAgent);
+  return Object.fromEntries(
+    Object.entries(models).map(([modelName, model]) => [
+      modelName,
+      { modelId: model.model, reasoningEffort: model.provider_opts?.extra_body?.reasoning_effort },
+    ]),
+  );
 }

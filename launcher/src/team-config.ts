@@ -1,19 +1,21 @@
 // Reads only what the launcher needs from a docker-agent team.yaml: the agent names
-// (to check a manifest's entry points) and the flavor names (the allowed --effort values).
+// (to check a manifest's entry points) and which standard flavors the team defines
+// (the allowed --model and --effort values).
 //
 // Why the launcher checks flavors itself: docker-agent v1.145.0 treats an unknown
 // --flavor as a silent no-op (exit 0, no warning, config unchanged). Without this
-// check, `--effort lwo` would run the team at its default effort and nobody would know.
+// check, `--effort hihg` would run the team at its default effort and nobody would know.
 // See docs/docker-agent/gotchas.md.
 //
-// Flavors named `reviewer-on-<tier>` are not efforts: j5 adds them itself to keep a reviewer
-// independent of the builder (launcher/src/independence.ts). They are listed apart, so they are
-// never offered as an effort and `--effort reviewer-on-opus` is rejected like any unknown name.
+// The flavor names are a contract (launcher/src/flavor-catalog.ts): `model-<tier>` and
+// `effort-<level>` are the user's choices, `reviewer-on-<tier>` is j5's own, to keep a reviewer
+// independent of the builder (launcher/src/independence.ts), and is never offered to the user.
 
 import { readFileSync } from "node:fs";
 
 import { z } from "zod";
 
+import { EFFORT_FLAVOR_PREFIX, MODEL_FLAVOR_PREFIX } from "./flavor-catalog.ts";
 import { isReviewerFlavorName } from "./independence.ts";
 
 const teamConfigSchema = z.object({
@@ -24,11 +26,21 @@ const teamConfigSchema = z.object({
 /** The parts of a team.yaml the launcher reads. */
 export type TeamConfigSummary = {
   agentNames: string[];
-  /** The user's effort choices, in declaration order; empty when the team defines none. */
-  flavorNames: string[];
-  /** Flavors j5 chooses for the reviewer (`reviewer-on-<tier>`), never offered as efforts. */
+  /** The tiers `--model` accepts (from `model-<tier>` flavors), in declaration order. */
+  modelTiers: string[];
+  /** The levels `--effort` accepts (from `effort-<level>` flavors), in declaration order. */
+  effortLevels: string[];
+  /** Flavors j5 chooses for the reviewer (`reviewer-on-<tier>`), never offered to the user. */
   reviewerFlavorNames: string[];
+  /** Flavors no launch option reaches; `validate:teams` rejects them. */
+  otherFlavorNames: string[];
 };
+
+function namesWithPrefix(flavorNames: string[], prefix: string): string[] {
+  return flavorNames
+    .filter((flavorName) => flavorName.startsWith(prefix))
+    .map((flavorName) => flavorName.slice(prefix.length));
+}
 
 /**
  * Reads agent and flavor names from a docker-agent team configuration.
@@ -43,7 +55,14 @@ export function readTeamConfigSummary(teamConfigPath: string): TeamConfigSummary
   const allFlavorNames = Object.keys(parseResult.data.flavors ?? {});
   return {
     agentNames: Object.keys(parseResult.data.agents),
-    flavorNames: allFlavorNames.filter((flavorName) => !isReviewerFlavorName(flavorName)),
+    modelTiers: namesWithPrefix(allFlavorNames, MODEL_FLAVOR_PREFIX),
+    effortLevels: namesWithPrefix(allFlavorNames, EFFORT_FLAVOR_PREFIX),
     reviewerFlavorNames: allFlavorNames.filter((flavorName) => isReviewerFlavorName(flavorName)),
+    otherFlavorNames: allFlavorNames.filter(
+      (flavorName) =>
+        !flavorName.startsWith(MODEL_FLAVOR_PREFIX) &&
+        !flavorName.startsWith(EFFORT_FLAVOR_PREFIX) &&
+        !isReviewerFlavorName(flavorName),
+    ),
   };
 }

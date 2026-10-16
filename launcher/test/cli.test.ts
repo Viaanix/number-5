@@ -185,7 +185,7 @@ describe("j5 --print", () => {
     expect(existsSync(worktreePath)).toBe(false);
   });
 
-  test("--project, --base, --effort and passthrough flags all reach the command", () => {
+  test("--project, --base, --model, --effort and passthrough flags all reach the command", () => {
     const { projectRoot } = createFixtureProject("flags-app");
     const elsewhere = createTemporaryDirectory();
     const worktreePath = expectedWorktreePath(projectRoot, "flags-app-issue-7");
@@ -197,8 +197,10 @@ describe("j5 --print", () => {
         `--project=${projectRoot}`,
         "--base",
         `origin/${FIXTURE_FEATURE_BRANCH}`,
+        "--model",
+        "haiku",
         "--effort",
-        "low",
+        "medium",
         "--print",
         "--",
         "--safety",
@@ -211,7 +213,7 @@ describe("j5 --print", () => {
       `fetch origin ${quoteForThisPlatform(FIXTURE_FEATURE_BRANCH)}`,
     );
     expect(result.standardOutput).toEndWith(
-      `--agent root --flavor low --flavor reviewer-on-sonnet --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
+      `--agent root --flavor model-haiku --flavor effort-medium --flavor reviewer-on-sonnet --working-dir ${quoteForThisPlatform(worktreePath)} --safety balanced ${quoteForThisPlatform(expectedFirstMessage(ISSUE_TEAM_NAME, "work-issue", { issue: "7" }))}${RUNNING_ON_WINDOWS ? " }" : ""}`,
     );
   });
 
@@ -334,7 +336,7 @@ describe("j5 in a terminal", () => {
   test("asks for a missing parameter as Need input: <label>", async () => {
     const { projectRoot } = createFixtureProject("prompt-app");
     const result = await runCliInTerminal(
-      ["pr-reviewer", "review", "--effort", "low", "--print"],
+      ["pr-reviewer", "review", "--model", "sonnet", "--effort", "low", "--print"],
       projectRoot,
     );
     expect(result.timedOut).toBe(true);
@@ -349,6 +351,8 @@ describe("j5 in a terminal", () => {
       [
         "issue-team",
         "work-issue",
+        "--model",
+        "sonnet",
         "--effort",
         "low",
         "--base",
@@ -376,6 +380,8 @@ describe("j5 in a terminal", () => {
         "work-issue",
         "--issue",
         "12",
+        "--model",
+        "sonnet",
         "--effort",
         "low",
         "--base",
@@ -402,7 +408,20 @@ describe("j5 usage errors", () => {
   test.each([
     [
       ["issue-team", "work-issue", "--issue", "12", "--effort", "lwo"],
-      "--effort 'lwo' is not a flavor of this team; choose one of: low",
+      "--effort 'lwo' is not an effort of this team; choose one of: low, medium, high, xhigh",
+    ],
+    [
+      ["issue-team", "work-issue", "--issue", "12", "--model", "hiaku"],
+      "--model 'hiaku' is not a model tier of this team; choose one of: haiku, sonnet, opus",
+    ],
+    // The reviewer's flavors are j5's choice, never a user's: they are no effort and no model.
+    [
+      ["issue-team", "work-issue", "--issue", "12", "--effort", "reviewer-on-opus"],
+      "--effort 'reviewer-on-opus' is not an effort of this team",
+    ],
+    [
+      ["issue-team", "work-issue", "--issue", "12", "--model", "reviewer-on-opus"],
+      "--model 'reviewer-on-opus' is not a model tier of this team",
     ],
     [["issue-team", "work-issue"], "missing --issue <integer> (Issue number)"],
     [
@@ -696,13 +715,14 @@ describe("j5 queue", () => {
 });
 
 describe("j5 list and help", () => {
-  test("list shows each issue-team entry point with its parameter, and the efforts", () => {
+  test("list shows each issue-team entry point with its parameter, the models and the efforts", () => {
     const result = runCli(["list"], createTemporaryDirectory());
     expect(result.exitCode).toBe(0);
     // The flavor header sits above the real listing, which must still follow it.
     expect(result.standardOutput).toStartWith("Input! Input!\n\nissue-team — ");
     expect(result.standardOutput).toContain("  work-issue --issue <integer>");
-    expect(result.standardOutput).toContain("  efforts: low");
+    expect(result.standardOutput).toContain("  models: haiku, sonnet, opus");
+    expect(result.standardOutput).toContain("  efforts: low, medium, high, xhigh");
   });
 
   // Catches the usage line of a parameterless entry point ending in a space, which

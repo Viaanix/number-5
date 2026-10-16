@@ -1,0 +1,36 @@
+# The standard flavors every team offers, defined once. `bun run flavors` writes them into each
+# team's team.yaml (the block between the BEGIN/END GENERATED FLAVORS markers) from this file and
+# the `flavors:` block of the team's workflow.yaml. See launcher/src/flavor-catalog.ts.
+#
+#   j5 <team> <entrypoint> --model <tier> --effort <level>
+#
+# After changing this file run `bun run flavors`; `bun run validate:teams` fails while a team.yaml
+# is out of date.
+
+# Tier name -> the model id that tier means for every team. The tier name must appear in the id
+# (haiku, sonnet, opus, fable), which `bun run flavors` checks. j5 uses the tiers to keep a
+# reviewer off the builders' model class, one step up the ladder haiku < sonnet < opus < fable.
+#
+# Opus 5.5 and Fable 5.1 are not here: the proxy's Claude login is rejected for them
+# (docs/docker-agent/gotchas.md). Add a tier here once a model for it works.
+tiers:
+  haiku: claude-haiku-5-5
+  sonnet: claude-sonnet-5-5
+  opus: claude-opus-4-7
+
+# Reasoning efforts, spelled as the proxy takes them. The proxy accepted low, medium, high and
+# xhigh on all three tiers above and rejected max (2026-10-15, one request per combination).
+#
+# Accepted is not the same as different. What Pi sends upstream (captured 2026-10-16, see
+# docs/docker-agent/gotchas.md) depends on the proxy image:
+#   - image 4.9.5 (Pi 0.73, our hand-written models.json): Sonnet and Haiku 5.5 get legacy
+#     token-budget thinking (low 2048, medium 8192, high 16384, xhigh 16384), so `xhigh` is the
+#     same as `high` there; Opus 4.7 gets a real effort at all four levels.
+#   - image 4.9.6-1 and later (Pi 1.3, no models.json): all four levels are distinct on all tiers.
+# `xhigh` stays in the list because the 4.9.6-1 image makes it real; with the 4.9.5 image it is
+# a harmless alias of `high` on two tiers.
+efforts:
+  - low
+  - medium
+  - high
+  - xhigh

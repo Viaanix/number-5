@@ -63,8 +63,7 @@ function buildRequest(overrides: Partial<LaunchRequest>): LaunchRequest {
     projectRoot: PROJECT_ROOT,
     repositoryName: "my-app",
     parameterValues: { issue: "12" },
-    effort: undefined,
-    automaticFlavors: [],
+    flavorNames: [],
     baseRef: "origin/main",
     worktree: { state: { kind: "absent" }, pullRequestBranch: undefined },
     queueItem: undefined,
@@ -109,13 +108,15 @@ describe("buildLaunchPlan — new worktree", () => {
     });
   });
 
-  // Catches the reviewer's flavor being applied before the effort: docker-agent applies flavors
-  // in order, so the reviewer's tier patch must land on the models the effort already set.
-  test("passes the automatic flavors after the effort flavor, in order", () => {
+  // Catches flavors reaching docker-agent in the wrong order: it applies them in the order given,
+  // so the reviewer's tier patch (j5's, last) must land on the models --model and --effort set.
+  test("passes every flavor in the order given", () => {
     const plan = buildLaunchPlan(
-      buildRequest({ effort: "low", automaticFlavors: ["reviewer-on-sonnet"] }),
+      buildRequest({
+        flavorNames: ["model-haiku", "effort-medium", "reviewer-on-sonnet"],
+      }),
     );
-    expect(plan.commandWords.slice(0, 10)).toEqual([
+    expect(plan.commandWords.slice(0, 12)).toEqual([
       "docker",
       "agent",
       "run",
@@ -123,14 +124,16 @@ describe("buildLaunchPlan — new worktree", () => {
       "--agent",
       "root",
       "--flavor",
-      "low",
+      "model-haiku",
+      "--flavor",
+      "effort-medium",
       "--flavor",
       "reviewer-on-sonnet",
     ]);
   });
 
-  test("adds only the automatic flavor when no effort was chosen", () => {
-    const plan = buildLaunchPlan(buildRequest({ automaticFlavors: ["reviewer-on-opus"] }));
+  test("adds a single flavor when only one was chosen", () => {
+    const plan = buildLaunchPlan(buildRequest({ flavorNames: ["reviewer-on-opus"] }));
     expect(plan.commandWords.slice(4, 8)).toEqual([
       "--agent",
       "root",
@@ -174,15 +177,15 @@ describe("buildLaunchPlan — new worktree", () => {
     ).toThrow(`${NEW_WORKTREE_PATH} exists and is not a worktree of ${PROJECT_ROOT}`);
   });
 
-  test("passes the effort as --flavor and passthrough flags before the message", () => {
+  test("passes the flavors as --flavor and passthrough flags before the message", () => {
     const plan = buildLaunchPlan(
-      buildRequest({ effort: "low", passthroughArguments: ["--safety", "balanced"] }),
+      buildRequest({ flavorNames: ["effort-low"], passthroughArguments: ["--safety", "balanced"] }),
     );
     expect(plan.commandWords.slice(4)).toEqual([
       "--agent",
       "root",
       "--flavor",
-      "low",
+      "effort-low",
       "--working-dir",
       NEW_WORKTREE_PATH,
       "--safety",

@@ -24,7 +24,7 @@ docker agent run team.yaml --dry-run --flavor nope "x"   # exit 0 as well
 
 **Consequence:** `--flavor lwo` runs the team at its default settings and nothing tells you.
 
-**Mitigation:** `j5` reads the flavor names from `team.yaml` and rejects anything else (`launcher/src/parameters.ts`, `describeInvalidEffort`). Do the same check in any other wrapper.
+**Mitigation:** `j5` reads the `model-*` and `effort-*` flavor names from `team.yaml` and rejects any other `--model` / `--effort` value (`launcher/src/parameters.ts`, `describeInvalidChoice`). Do the same check in any other wrapper.
 
 ### A flavor that repeats the base values applies without a word
 
@@ -34,7 +34,7 @@ docker agent run team.yaml --dry-run --flavor nope "x"   # exit 0 as well
 
 **Consequence:** a flavor can look meaningful in review and change nothing.
 
-**Mitigation:** `bun run validate:teams` fails any flavor whose resolved config equals the base.
+**Mitigation:** `bun run validate:teams` compares each generated flavor's merged config with what its name promises (`model-opus` puts the tunable models on an Opus model, `effort-high` sets `reasoning_effort: high`), not with the base, because a flavor that is right can equal the base (`effort-high` on a team already at `high`).
 
 What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 - an unknown key: `agent:` instead of `agents:` → `unknown field "agent"`;
@@ -48,6 +48,50 @@ What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 **Receipt:** a flavor with `models: { lead: { model: claude-haiku-4-5 } }`, resolved with `docker agent debug config team.yaml --flavor low`, keeps `provider: anthropic` from the base and changes only `model`. With a flavor applied, `debug config` no longer prints the `flavors:` section.
 
 **Consequence:** a flavor only needs the keys it changes. Lists are not checked yet; assume a list in a flavor replaces the base list until someone verifies it.
+
+### A flavor that names a model the team does not have adds an incomplete model, silently
+
+**Observed:** v1.145.0, 2026-10-15.
+
+**Receipt:** a team with `models: { real: {provider: pi, model: claude-sonnet-5-5} }` and a flavor `typo: { models: { rael: { model: claude-haiku-5-5 } } }`: `docker agent debug config team.yaml --flavor typo` exits 0 and prints both `real` and a new `rael` with `model:` and no `provider`; `docker agent run … --flavor typo --dry-run --exec x` exits 0 as well.
+
+**Consequence:** a misspelled model name in a flavor changes nothing and reports nothing; the intended model keeps its base settings.
+
+**Mitigation:** the flavors are generated, and the generator refuses a tunable name that is not a model in `team.yaml` (`launcher/src/flavor-catalog.ts`, `resolveTuning`).
+
+### `--model` and `--effort` flavors patch different keys, so order does not matter
+
+**Observed:** v1.145.0, 2026-10-15, issue-team's generated flavors.
+
+**Receipt:** `docker agent debug config team.yaml --flavor model-haiku --flavor effort-xhigh --flavor reviewer-on-sonnet` and the same with `effort-xhigh` first printed identical models: builders, coordinator and tester on `claude-haiku-5-5` at `reasoning_effort: xhigh`, the reviewer on `claude-sonnet-5-5` at `xhigh`.
+
+**Consequence:** the launcher may pass them in any order; it passes model, effort, then j5's reviewer flavor, because the reviewer flavor must be read after the others to see the builders' tier.
+
+### The proxy takes `reasoning_effort` low, medium, high and xhigh, not max
+
+**Observed:** proxy with pi-openai-proxy 4.9.5, Pi 0.73.0, 2026-10-15.
+
+**Receipt:** one request per combination to `POST /v1/chat/completions` with `max_tokens: 64`, `reasoning_effort: <value>` and the prompt "Reply with the single word OK.", on `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-4-7`: `low`, `medium`, `high` and `xhigh` answered HTTP 200 on all three; `max` answered HTTP 400 `Invalid value for 'reasoning_effort': Invalid option: expected one of "none"|"minimal"|"low"|"medium"|…` on all three.
+
+**Consequence:** `workflows/flavors.yaml` lists `low`, `medium`, `high` and `xhigh`. Accepted is not the same as different: see the next entry for what Pi actually sends (`none` and `minimal` are accepted spellings too, and not offered).
+
+### Our `models.json` entries replace Pi's built-in model definitions, and with them adaptive effort
+
+**Observed:** 2026-10-16. Pi 0.73.0 (pi-ai 0.73.1) and Pi 1.3.0 (pi-ai 1.3.0), `containers/pi-openai-proxy/models.json` as committed.
+
+**Receipt:** the request body Pi would send to Anthropic, captured with no network and no credentials. With 1.3.0: `ModelRuntime.create({ authPath, modelsPath, refreshOnCreate: false })`, then `runtime.completeSimple(model, context, { reasoning: level, apiKey: "sk-ant-capture", maxRetries: 0, fetch })`, where `fetch` stores `JSON.parse(init.body)` and answers 400. With 0.73.0: `ModelRegistry.create(AuthStorage.inMemory({}))` and `completeSimple` with `onPayload` storing the payload and aborting the request.
+
+| Setup | `claude-sonnet-5-5` and `claude-haiku-5-5` | `claude-opus-4-7` |
+|---|---|---|
+| Pi 0.73.0, our `models.json` (the live proxy) | `thinking: {type: "enabled", budget_tokens: 2048 / 8192 / 16384 / 16384, display: "summarized"}` for low / medium / high / xhigh; no `output_config` | `thinking: {type: "adaptive"}`, `output_config.effort` low / medium / high / xhigh |
+| Pi 1.3.0, our `models.json` | the same legacy budgets (minimal 1024) | the same adaptive efforts |
+| Pi 1.3.0, its built-in definitions only (`modelsPath: null`) | `thinking: {type: "adaptive"}`, `output_config.effort: "high"` always, and the level in a trailing `{"role": "system", "content": [], "output_config": {"effort": "<level>"}}` message: low and xhigh requests differ only there | `output_config.effort` = the level |
+
+The metadata that selects adaptive thinking (`compat.forceAdaptiveThinking`, `thinkingLevelMap`, and for Claude 5 `supportsMidConvoEffort`) is on the built-in entries. A hand-written entry with the same id replaces it and drops all three (`compat=null thinkingLevelMap=null` in the capture), so Pi falls back to `budget_tokens`, and any level it cannot map falls through to `high`. Pi 1.3.0 lists `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1` as built-ins (`runtime.getModels("anthropic")`).
+
+**Image 4.9.6-1, captured inside the built image (2026-10-16).** The image from the Pi 1.x migration (Pi 1.3.0, no `models.json`; its own pinned packages, `modelsPath: null`) sends `thinking: {type: "adaptive"}` on `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1` with the level in the managed-effort message (`message:low`, `message:medium`, `message:high`, `message:xhigh`), and `output_config.effort` = the level on `claude-opus-4-7`: four distinct levels on all five models.
+
+**Consequence:** with the 4.9.5 image `--effort xhigh` is the same as `--effort high` for Sonnet and Haiku (builders, and the Haiku tier) and real only on Opus; with 4.9.6-1 and later it is real everywhere. Anthropic's compatibility page also calls manually budgeted thinking a legacy mode on current models (not tested here, from their documentation). `models.json` must not list models Pi already knows, or the legacy path comes back. Not tried: a live request showing the model's behavior differ between two levels; the capture proves what is sent, not what the model does with it.
 
 ## Running and dry runs
 

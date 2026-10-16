@@ -85,6 +85,12 @@ const independenceSchema = z.strictObject({
   reviews: z.array(z.string().min(1)).min(1),
 });
 
+// Which of the team's named models --model and --effort change. The standard flavors that do it
+// are generated into team.yaml from workflows/flavors.yaml (launcher/src/flavor-catalog.ts).
+const flavorsSchema = z.strictObject({
+  models: z.array(z.string().min(1)).min(1),
+});
+
 const manifestSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
@@ -92,6 +98,7 @@ const manifestSchema = z.strictObject({
   path: z.array(z.string().min(1)).default([]),
   entrypoints: z.record(z.string(), entryPointSchema),
   independence: independenceSchema.optional(),
+  flavors: flavorsSchema.optional(),
 });
 
 /** One user-supplied value an entry point needs, such as an issue number. */
@@ -105,6 +112,9 @@ export type QueueDefinition = z.infer<typeof queueSchema>;
 
 /** Which agent must not share a model class with the agents whose work it reviews. */
 export type IndependenceRule = z.infer<typeof independenceSchema>;
+
+/** The named models --model and --effort change, from the manifest's `flavors:` block. */
+export type FlavorsDefinition = z.infer<typeof flavorsSchema>;
 
 /** One way of starting a team: an agent, its parameters, worktree mode and first message. */
 export type EntryPointDefinition = z.infer<typeof entryPointSchema>;
@@ -133,6 +143,12 @@ export function findManifestProblems(manifest: z.infer<typeof manifestSchema>): 
     if (new Set(reviews).size !== reviews.length) {
       problems.push("independence.reviews: an agent is listed twice");
     }
+  }
+  if (
+    manifest.flavors !== undefined &&
+    new Set(manifest.flavors.models).size !== manifest.flavors.models.length
+  ) {
+    problems.push("flavors.models: a model is listed twice");
   }
   for (const [entryPointName, entryPoint] of Object.entries(manifest.entrypoints)) {
     const where = `entrypoints.${entryPointName}`;
