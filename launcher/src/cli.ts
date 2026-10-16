@@ -62,7 +62,7 @@ import {
   type RoundLimit,
 } from "./queue.ts";
 import { chooseAutomaticFlavors } from "./reviewer-flavor.ts";
-import { runPlan, runQueue } from "./run.ts";
+import { runPlan, runQueue, type QueueRunItem } from "./run.ts";
 import { createSetupEnvironment, runCapturedCommand, runSetup } from "./setup.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
@@ -396,21 +396,27 @@ type QueueSource =
 /** A queue run's choices; undefined from chooseQueue means a single run. */
 type QueueChoice = { parameterName: string; source: QueueSource; roundLimit: RoundLimit };
 
-/** The numbers a queue runs over: the ones given, or the ones gh lists in the project's repository. */
+/**
+ * The numbers a queue runs over: the ones given, or the ones gh lists in the project's repository.
+ * `skippedForks` are unreviewed pull requests from forks that `--queue-unreviewed` left out.
+ */
 function listQueueValues(
   source: QueueSource,
   items: NonNullable<EntryPointDefinition["queue"]>["items"],
   projectRoot: string,
-): string[] {
+): { values: string[]; skippedForks: string[] } {
   if (source.kind === "values") {
-    return source.values;
+    return { values: source.values, skippedForks: [] };
   }
   if (source.kind === "label") {
-    return items === "pull-requests"
-      ? listOpenPullRequestsWithLabel(projectRoot, source.label)
-      : listOpenIssuesWithLabel(projectRoot, source.label);
+    const values =
+      items === "pull-requests"
+        ? listOpenPullRequestsWithLabel(projectRoot, source.label)
+        : listOpenIssuesWithLabel(projectRoot, source.label);
+    return { values, skippedForks: [] };
   }
-  return listUnreviewedPullRequests(projectRoot);
+  const { pullRequests, skippedForks } = listUnreviewedPullRequests(projectRoot);
+  return { values: pullRequests, skippedForks };
 }
 
 /**
@@ -460,7 +466,7 @@ async function chooseQueue(
   const singleValueGiven = optionValues.has(queue.parameter);
   if (singleValueGiven && queuedByLaunchOption) {
     throw new UsageError(
-      `--${queue.parameter} runs one item; --queue / --queue-label run several; give one`,
+      `--${queue.parameter} runs one item; --queue / --queue-label / --queue-unreviewed run several; give one`,
     );
   }
 
@@ -734,7 +740,16 @@ async function launch(
     if (queueDefinition === undefined) {
       throw new Error("a queue choice was made for an entry point without a queue");
     }
-    const queueValues = listQueueValues(queueChoice.source, queueDefinition.items, projectRoot);
+    const { values: queueValues, skippedForks } = listQueueValues(
+      queueChoice.source,
+      queueDefinition.items,
+      projectRoot,
+    );
+    if (skippedForks.length > 0) {
+      console.error(
+        `j5: skipped ${skippedForks.length} pull request(s) from forks, which j5 cannot review (the reviewer works on a branch of this repository): ${skippedForks.map((number) => `#${number}`).join(", ")}`,
+      );
+    }
     if (queueValues.length === 0 && queueChoice.source.kind === "label") {
       throw new UsageError(
         `no open ${describeQueueItem(queueDefinition.items)}s have the label '${queueChoice.source.label}'`,
@@ -743,7 +758,7 @@ async function launch(
     if (queueValues.length === 0) {
       // The normal outcome of a nightly run that has already caught up, so not an error.
       console.error(
-        "j5: no open pull request needs a review: each is a draft, or already has this account's review of its latest commit",
+        "j5: no open pull request needs a review: each is a draft, from a fork, or already has this account's review of its latest commit",
       );
       return EXIT_CODE_SUCCESS;
     }
@@ -754,17 +769,42 @@ async function launch(
       ? parsedArguments.passthroughArguments
       : [...parsedArguments.passthroughArguments, UNATTENDED_FLAG];
     const roundLimitText = describeRoundLimit(queueChoice.roundLimit);
-    const queueItems = queueValues.map((value, index) => ({
-      value,
-      plan: buildPlan(
-        { ...parameterValues, [queueChoice.parameterName]: value },
-        { position: index + 1, count: queueValues.length, roundLimitText },
-        unattendedPassthrough,
-        queueFlavorNames,
-      ),
-    }));
+    // An item that cannot be planned (a pull request from a fork, or one whose pull ref lags a
+    // push) fails as that item and the others still run. When none can be planned the first
+    // error is raised as it is, so a mistake that affects every item (a bad worktree name, say)
+    // still stops the run with its own message.
+    let firstPlanningFailure: unknown;
+    const queueItems: QueueRunItem[] = queueValues.map((value, index) => {
+      try {
+        return {
+          value,
+          plan: buildPlan(
+            { ...parameterValues, [queueChoice.parameterName]: value },
+            { position: index + 1, count: queueValues.length, roundLimitText },
+            unattendedPassthrough,
+            queueFlavorNames,
+          ),
+        };
+      } catch (error) {
+        firstPlanningFailure ??= error;
+        return { value, planningError: error instanceof Error ? error.message : String(error) };
+      }
+    });
+    if (!queueItems.some((item) => "plan" in item)) {
+      throw firstPlanningFailure instanceof Error
+        ? firstPlanningFailure
+        : new Error(String(firstPlanningFailure));
+    }
     if (parsedArguments.switches.has("print")) {
-      console.log(queueItems.map((item) => renderCommandLine(item.plan)).join("\n"));
+      console.log(
+        queueItems
+          .map((item) =>
+            "plan" in item
+              ? renderCommandLine(item.plan)
+              : `# j5: ${queueChoice.parameterName} ${item.value} cannot be run: ${item.planningError}`,
+          )
+          .join("\n"),
+      );
       return EXIT_CODE_SUCCESS;
     }
     // Only a queue whose preamble talks about fix rounds has a round limit worth reporting.

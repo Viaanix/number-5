@@ -16,13 +16,16 @@ export function reviewedHeadOfComment(commentBody: string): string | undefined {
 }
 
 /**
- * One open pull request as `gh pr list --json number,isDraft,headRefOid,comments` prints it.
- * `author` is null for an account that no longer exists.
+ * One open pull request as
+ * `gh pr list --json number,isDraft,isCrossRepository,headRefOid,comments` prints it.
+ * `author` is null for an account that no longer exists. A gh that does not print
+ * `isCrossRepository` leaves every pull request counted as one of this repository's own.
  */
 export const pullRequestListingsSchema = z.array(
   z.object({
     number: z.number().int().positive(),
     isDraft: z.boolean(),
+    isCrossRepository: z.boolean().default(false),
     headRefOid: z.string().min(1),
     comments: z.array(
       z.object({
@@ -35,11 +38,20 @@ export const pullRequestListingsSchema = z.array(
 
 export type PullRequestListing = z.infer<typeof pullRequestListingsSchema>[number];
 
+/** The pull requests that still need a review, oldest first, and the ones j5 cannot review. */
+export type UnreviewedPullRequests = {
+  /** Branches of this repository: the ones a review queue can work. */
+  reviewable: number[];
+  /** From a fork: their head is no branch of this repository, so the reviewer's worktree step refuses them. */
+  forks: number[];
+};
+
 /**
- * The numbers of the pull requests that still need a review, oldest first: not a draft, and no
- * comment by `reviewerLogin` carries a stamp for the pull request's current head. A push after
- * the review changes the head, so the pull request comes back; a draft is skipped because its
- * author has said it is not ready.
+ * The pull requests that still need a review: not a draft, and no comment by `reviewerLogin`
+ * carries a stamp for the pull request's current head. A push after the review changes the head,
+ * so the pull request comes back; a draft is skipped because its author has said it is not ready.
+ * Fork pull requests are set apart rather than queued: a fork's pull request is never reviewed, so
+ * it never gets a stamp and would fail its item on every scheduled run, forever.
  *
  * Only the reviewer's own comments count. Anyone who can comment could otherwise quote the head
  * commit in a stamp line and keep a pull request out of the queue.
@@ -47,18 +59,21 @@ export type PullRequestListing = z.infer<typeof pullRequestListingsSchema>[numbe
 export function selectUnreviewedPullRequests(
   pullRequests: readonly PullRequestListing[],
   reviewerLogin: string,
-): number[] {
-  return pullRequests
-    .filter((pullRequest) => {
-      if (pullRequest.isDraft) {
-        return false;
-      }
-      return !pullRequest.comments.some(
-        (comment) =>
-          comment.author?.login === reviewerLogin &&
-          reviewedHeadOfComment(comment.body) === pullRequest.headRefOid,
-      );
-    })
-    .map((pullRequest) => pullRequest.number)
-    .toSorted((left, right) => left - right);
+): UnreviewedPullRequests {
+  const unreviewed = pullRequests.filter((pullRequest) => {
+    if (pullRequest.isDraft) {
+      return false;
+    }
+    return !pullRequest.comments.some(
+      (comment) =>
+        comment.author?.login === reviewerLogin &&
+        reviewedHeadOfComment(comment.body) === pullRequest.headRefOid,
+    );
+  });
+  const oldestFirst = (selected: readonly PullRequestListing[]): number[] =>
+    selected.map((pullRequest) => pullRequest.number).toSorted((left, right) => left - right);
+  return {
+    reviewable: oldestFirst(unreviewed.filter((pullRequest) => !pullRequest.isCrossRepository)),
+    forks: oldestFirst(unreviewed.filter((pullRequest) => pullRequest.isCrossRepository)),
+  };
 }

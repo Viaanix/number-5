@@ -29,6 +29,7 @@ import {
 } from "../src/shell-quote.ts";
 import { fillTemplate } from "../src/template.ts";
 import {
+  addForkPullRequestToOrigin,
   addPullRequestToOrigin,
   createFixtureProject,
   createTemporaryDirectory,
@@ -755,7 +756,7 @@ describe("j5 queue", () => {
     ],
     [
       ["--queue", "1", "--issue", "2", "--max-rounds", "2"],
-      "--issue runs one item; --queue / --queue-label run several",
+      "--issue runs one item; --queue / --queue-label / --queue-unreviewed run several",
     ],
     [
       ["--issue", "2", "--max-rounds", "2"],
@@ -789,11 +790,16 @@ const stampedReport = (headOid: string): string =>
 
 function listedPullRequest(
   number: number,
-  overrides: { isDraft?: boolean; comments?: Array<{ login: string | null; body: string }> } = {},
+  overrides: {
+    isDraft?: boolean;
+    isCrossRepository?: boolean;
+    comments?: Array<{ login: string | null; body: string }>;
+  } = {},
 ) {
   return {
     number,
     isDraft: overrides.isDraft ?? false,
+    isCrossRepository: overrides.isCrossRepository ?? false,
     headRefOid: `${String(number).padStart(2, "0")}${"a".repeat(38)}`,
     comments: (overrides.comments ?? []).map((comment) => ({
       author: comment.login === null ? null : { login: comment.login },
@@ -984,7 +990,7 @@ describe("j5 pull request queue", () => {
     ],
     [
       ["pr-reviewer", "review", "--queue-unreviewed", "--pr", "3"],
-      "--pr runs one item; --queue / --queue-label run several",
+      "--pr runs one item; --queue / --queue-label / --queue-unreviewed run several",
     ],
   ])("%p exits 2 with a specific message", (cliArguments, expectedMessage) => {
     const { projectRoot } = createFixtureProject("pr-queue-usage-app");
@@ -1015,6 +1021,75 @@ describe("j5 pull request queue", () => {
         "utf8",
       ),
     ).not.toContain("fix rounds");
+  });
+
+  // Catches one pull request whose branch cannot be found (a fork's, or a pull ref that lags a
+  // push) aborting the whole queue before any item runs, which would make a repository with one
+  // such open pull request unreviewable for good. Every plan used to be built before the first run.
+  test("an item that cannot be planned fails as that item and the others still run", () => {
+    const { projectRoot } = createFixtureProject("fork-in-queue-app");
+    addPullRequestToOrigin(projectRoot, 4);
+    addForkPullRequestToOrigin(projectRoot, 5);
+
+    const result = runCli(["pr-reviewer", "review", "--queue", "5,4"], projectRoot);
+
+    expect(result.exitCode).toBe(1);
+    const summary = result.standardOutput;
+    expect(summary).toContain("- #5: FAILED: pull request #5's head");
+    expect(summary).toContain("is not the tip of any branch in origin");
+    // #4 was started: it ran the stand-in docker, which prints no RESULT line.
+    expect(summary).toContain("- #4: FAILED: no RESULT line (exit 7)");
+  });
+
+  // Catches a mistake that affects every item (here, nothing can be planned) being reported as a
+  // queue of failed items, with a log directory, instead of stopping with its own message.
+  test("a queue in which no item can be planned stops with that error and creates no logs", () => {
+    const { projectRoot } = createFixtureProject("only-fork-app");
+    addForkPullRequestToOrigin(projectRoot, 5);
+
+    const result = runCli(["pr-reviewer", "review", "--queue", "5"], projectRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.standardError).toContain("is not the tip of any branch in origin");
+    expect(existsSync(join(projectRoot, ".j5"))).toBe(false);
+  });
+
+  test("--print shows the plan of each item and notes the one that cannot be run", () => {
+    const { projectRoot } = createFixtureProject("print-fork-app");
+    addPullRequestToOrigin(projectRoot, 4);
+    addForkPullRequestToOrigin(projectRoot, 5);
+
+    const result = runCli(["pr-reviewer", "review", "--queue", "4,5", "--print"], projectRoot);
+
+    expect(result.exitCode).toBe(0);
+    expect(queuedPullRequests(result.standardOutput)).toEqual([["4", "1"]]);
+    expect(result.standardOutput).toContain("# j5: pr 5 cannot be run: pull request #5's head");
+  });
+
+  // Catches a fork's pull request being queued by --queue-unreviewed: it is never reviewed, so it
+  // never gets a stamp and would fail its item on every scheduled run, forever. It must also be
+  // said aloud, not dropped silently.
+  test("--queue-unreviewed leaves out pull requests from forks and says so", () => {
+    const { projectRoot } = createFixtureProject("forks-skipped-app");
+    addPullRequestToOrigin(projectRoot, 4);
+    const gh = setUpFakeGh([
+      listedPullRequest(4),
+      listedPullRequest(5, { isCrossRepository: true }),
+      listedPullRequest(6, { isCrossRepository: true, isDraft: true }),
+    ]);
+
+    const result = runCli(
+      ["pr-reviewer", "review", "--queue-unreviewed", "--print"],
+      projectRoot,
+      gh.pathValue,
+      gh.environment,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(queuedPullRequests(result.standardOutput)).toEqual([["4", "1"]]);
+    expect(result.standardError).toContain("skipped 1 pull request(s) from forks");
+    expect(result.standardError).toContain("#5");
+    expect(result.standardError).not.toContain("#6");
   });
 });
 

@@ -30,12 +30,14 @@ describe("the review stamp", () => {
     const listing = {
       number: 9,
       isDraft: false,
+      isCrossRepository: false,
       headRefOid: HEAD,
       comments: [{ author: { login: REVIEWER }, body: postedBody }],
     };
-    expect(selectUnreviewedPullRequests([listing], REVIEWER)).toEqual([]);
+    expect(selectUnreviewedPullRequests([listing], REVIEWER).reviewable).toEqual([]);
     expect(
-      selectUnreviewedPullRequests([{ ...listing, headRefOid: "f".repeat(40) }], REVIEWER),
+      selectUnreviewedPullRequests([{ ...listing, headRefOid: "f".repeat(40) }], REVIEWER)
+        .reviewable,
     ).toEqual([9]);
   });
 });

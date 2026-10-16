@@ -19,8 +19,13 @@ const SUCCESS_EXIT_CODE = 0;
 const FAILURE_EXIT_CODE = 1;
 const SUMMARY_FILE_NAME = "summary.md";
 
-/** One item of a queue run: the queue parameter's value and the plan that works it. */
-export type QueueRunItem = { value: string; plan: LaunchPlan };
+/**
+ * One item of a queue run: the queue parameter's value and either the plan that works it or why
+ * no plan could be made (a pull request from a fork, say), which makes it a failed item.
+ */
+export type QueueRunItem =
+  | { value: string; plan: LaunchPlan }
+  | { value: string; planningError: string };
 
 /**
  * Resolves the plan's command against the PATH the child will get, including Windows
@@ -144,11 +149,14 @@ export async function runQueue(
   queueParameterName: string,
   title: string,
 ): Promise<number> {
-  const [firstItem] = items;
-  if (firstItem === undefined) {
+  const firstPlannedItem = items.find((item) => "plan" in item);
+  if (items.length === 0) {
     throw new Error("the queue is empty");
   }
-  const executablePath = resolveExecutable(firstItem.plan);
+  if (firstPlannedItem === undefined || !("plan" in firstPlannedItem)) {
+    throw new Error("no item of the queue could be planned");
+  }
+  const executablePath = resolveExecutable(firstPlannedItem.plan);
   mkdirSync(logDirectory, { recursive: true });
 
   // One handler for the whole queue. Ctrl-C reaches the running docker-agent too (same
@@ -173,6 +181,9 @@ export async function runQueue(
     const logPath = join(logDirectory, `${queueParameterName}-${item.value}.log`);
     let report: QueueItemReport;
     try {
+      if ("planningError" in item) {
+        throw new Error(item.planningError);
+      }
       runPreparationSteps(item.plan);
       const { exitCode, output } = await runQueueItem(item.plan, executablePath, logPath);
       report = { value: item.value, outcome: classifyQueueItem(exitCode, output), logPath };

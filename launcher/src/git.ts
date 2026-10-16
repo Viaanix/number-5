@@ -311,12 +311,16 @@ export function listOpenPullRequestsWithLabel(repositoryRoot: string, label: str
 /**
  * Lists the numbers of the repository's open, non-draft pull requests that the logged-in gh
  * account has not reviewed at their current head commit, oldest first (the rule is in
- * review-status.ts). Needs a gh login (or GH_TOKEN) that can see the repository.
+ * review-status.ts), and separately the unreviewed ones from forks, which j5 cannot review.
+ * Needs a gh login (or GH_TOKEN) that can see the repository.
  * @throws Error when gh fails, prints something unexpected, or the repository has so many open
  *   pull requests that the listing may have been cut short (a cut listing would silently skip the
  *   oldest ones).
  */
-export function listUnreviewedPullRequests(repositoryRoot: string): string[] {
+export function listUnreviewedPullRequests(repositoryRoot: string): {
+  pullRequests: string[];
+  skippedForks: string[];
+} {
   const account = runCommand(["gh", "api", "user", "--jq", ".login"], repositoryRoot);
   if (account.exitCode !== SUCCESS_EXIT_CODE || account.standardOutput === "") {
     throw new Error(
@@ -331,7 +335,7 @@ export function listUnreviewedPullRequests(repositoryRoot: string): string[] {
       "--state",
       "open",
       "--json",
-      "number,isDraft,headRefOid,comments",
+      "number,isDraft,isCrossRepository,headRefOid,comments",
       "--limit",
       String(LISTING_LIMIT),
     ],
@@ -351,5 +355,6 @@ export function listUnreviewedPullRequests(repositoryRoot: string): string[] {
       `${parsed.data.length} open pull requests: the listing may be cut short, so some would be skipped silently; use --queue-label or --queue to name them`,
     );
   }
-  return selectUnreviewedPullRequests(parsed.data, account.standardOutput).map(String);
+  const { reviewable, forks } = selectUnreviewedPullRequests(parsed.data, account.standardOutput);
+  return { pullRequests: reviewable.map(String), skippedForks: forks.map(String) };
 }
