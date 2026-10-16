@@ -20,7 +20,12 @@ tiers:
 
 # Reasoning efforts, spelled as the proxy takes them. The proxy accepted low, medium, high and
 # xhigh on all three tiers above and rejected max (2026-10-15, one request per combination).
-# Accepted is not the same as different: that a level changes the model's behavior is not tested.
+#
+# Accepted is not the same as different. What Pi sends upstream today (captured 2026-10-16, see
+# docs/docker-agent/gotchas.md): on the live proxy (Pi 0.73, our models.json) Sonnet and Haiku 5.5
+# get legacy token-budget thinking (low 2048, medium 8192, high 16384, xhigh 16384), so `xhigh`
+# is the same as `high` there; Opus 4.7 gets a real effort at all four levels. Pi 1.x with its own
+# built-in definitions makes all four levels distinct on all three tiers.
 efforts:
   - low
   - medium

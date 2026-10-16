@@ -73,7 +73,23 @@ What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 
 **Receipt:** one request per combination to `POST /v1/chat/completions` with `max_tokens: 64`, `reasoning_effort: <value>` and the prompt "Reply with the single word OK.", on `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-4-7`: `low`, `medium`, `high` and `xhigh` answered HTTP 200 on all three; `max` answered HTTP 400 `Invalid value for 'reasoning_effort': Invalid option: expected one of "none"|"minimal"|"low"|"medium"|…` on all three.
 
-**Consequence:** `workflows/flavors.yaml` lists `low`, `medium`, `high` and `xhigh`. Accepted is not the same as different: that a level changes a model's behavior was not tested (`none` and `minimal` are accepted spellings too, and not offered).
+**Consequence:** `workflows/flavors.yaml` lists `low`, `medium`, `high` and `xhigh`. Accepted is not the same as different: see the next entry for what Pi actually sends (`none` and `minimal` are accepted spellings too, and not offered).
+
+### Our `models.json` entries replace Pi's built-in model definitions, and with them adaptive effort
+
+**Observed:** 2026-10-16. Pi 0.73.0 (pi-ai 0.73.1) and Pi 1.3.0 (pi-ai 1.3.0), `containers/pi-openai-proxy/models.json` as committed.
+
+**Receipt:** the request body Pi would send to Anthropic, captured with no network and no credentials. With 1.3.0: `ModelRuntime.create({ authPath, modelsPath, refreshOnCreate: false })`, then `runtime.completeSimple(model, context, { reasoning: level, apiKey: "sk-ant-capture", maxRetries: 0, fetch })`, where `fetch` stores `JSON.parse(init.body)` and answers 400. With 0.73.0: `ModelRegistry.create(AuthStorage.inMemory({}))` and `completeSimple` with `onPayload` storing the payload and aborting the request.
+
+| Setup | `claude-sonnet-5-5` and `claude-haiku-5-5` | `claude-opus-4-7` |
+|---|---|---|
+| Pi 0.73.0, our `models.json` (the live proxy) | `thinking: {type: "enabled", budget_tokens: 2048 / 8192 / 16384 / 16384, display: "summarized"}` for low / medium / high / xhigh; no `output_config` | `thinking: {type: "adaptive"}`, `output_config.effort` low / medium / high / xhigh |
+| Pi 1.3.0, our `models.json` | the same legacy budgets (minimal 1024) | the same adaptive efforts |
+| Pi 1.3.0, its built-in definitions only (`modelsPath: null`) | `thinking: {type: "adaptive"}`, `output_config.effort: "high"` always, and the level in a trailing `{"role": "system", "content": [], "output_config": {"effort": "<level>"}}` message: low and xhigh requests differ only there | `output_config.effort` = the level |
+
+The metadata that selects adaptive thinking (`compat.forceAdaptiveThinking`, `thinkingLevelMap`, and for Claude 5 `supportsMidConvoEffort`) is on the built-in entries. A hand-written entry with the same id replaces it and drops all three (`compat=null thinkingLevelMap=null` in the capture), so Pi falls back to `budget_tokens`, and any level it cannot map falls through to `high`. Pi 1.3.0 lists `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1` as built-ins (`runtime.getModels("anthropic")`).
+
+**Consequence:** on the live proxy `--effort xhigh` is the same as `--effort high` for Sonnet and Haiku (builders, and the Haiku tier); it is real only on Opus. Anthropic's compatibility page also calls manually budgeted thinking a legacy mode on current models (not tested here, from their documentation). When the image moves to Pi 1.x, `models.json` must stop listing models Pi already knows, or the legacy path stays. Not tried: a live request showing the model's behavior differ between two levels; the capture proves what is sent, not what the model does with it.
 
 ## Running and dry runs
 
