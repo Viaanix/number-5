@@ -185,31 +185,73 @@ permissions:
     - "shell:cmd=*gh repo delete*"
     - "shell:cmd=*gh release*"
 
-# Effort levels, chosen with `j5 issue-team ... --effort <name>` (docker agent run
-# --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
-# the file as written (the builders on Sonnet 5.5 at effort high, the reviewer on Opus 4.7).
-# docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
+# Launch options, chosen with `j5 issue-team ... --model <tier> --effort <level>`: standard
+# flavors (docker agent run --flavor ...), a YAML patch deep-merged over this file, defined once
+# in workflows/flavors.yaml and written into the block below by `bun run flavors`.
+# `flavors.models` in workflow.yaml lists the models --model changes (coordinator, builder,
+# tester). --effort also sets the reviewer's effort. No flavor = the file as written (the
+# builders on Sonnet 5.5, the reviewer on Opus 4.7, all at effort high).
 #
-# The reviewer-on-<tier> flavors are not efforts and --effort rejects them: j5 adds one itself,
-# after the effort, so the reviewer is one model tier above the builders (or one below when the
-# builders are already on the top tier). `low` puts the builders on Haiku, so j5 adds
-# reviewer-on-sonnet; the default builders are Sonnet, so it adds reviewer-on-opus. Only tiers
-# listed here can be chosen; Fable is not, because the proxy cannot serve it yet.
+# The reviewer-on-<tier> flavors are j5's, never a user choice: after --model and --effort it adds
+# one so the reviewer is one model tier above the builders (or one below when the builders are
+# already on the top tier). docker-agent ignores an unknown --flavor silently; j5 rejects names
+# the team does not define.
+# BEGIN GENERATED FLAVORS: written by `bun run flavors` from workflows/flavors.yaml and the
+# `flavors:` block of workflow.yaml. Edit those, not this block.
 flavors:
-  low:
+  model-haiku:
     models:
       coordinator_model:
         model: claude-haiku-5-5
+      builder_model:
+        model: claude-haiku-5-5
+      tester_model:
+        model: claude-haiku-5-5
+  model-sonnet:
+    models:
+      coordinator_model:
+        model: claude-sonnet-5-5
+      builder_model:
+        model: claude-sonnet-5-5
+      tester_model:
+        model: claude-sonnet-5-5
+  model-opus:
+    models:
+      coordinator_model:
+        model: claude-opus-4-7
+      builder_model:
+        model: claude-opus-4-7
+      tester_model:
+        model: claude-opus-4-7
+  effort-low:
+    models:
+      coordinator_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      builder_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      tester_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+  effort-medium:
+    models:
+      coordinator_model:
         provider_opts:
           extra_body:
             reasoning_effort: medium
       builder_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
       tester_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
@@ -217,6 +259,46 @@ flavors:
         provider_opts:
           extra_body:
             reasoning_effort: medium
+  effort-high:
+    models:
+      coordinator_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      builder_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      tester_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+  effort-xhigh:
+    models:
+      coordinator_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      builder_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      tester_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+  reviewer-on-haiku:
+    models:
+      reviewer_model:
+        model: claude-haiku-5-5
   reviewer-on-sonnet:
     models:
       reviewer_model:
@@ -225,3 +307,4 @@ flavors:
     models:
       reviewer_model:
         model: claude-opus-4-7
+# END GENERATED FLAVORS

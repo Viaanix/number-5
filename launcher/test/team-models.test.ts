@@ -4,7 +4,11 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { type DockerAgentResult, resolveAgentModels } from "../src/team-models.ts";
+import {
+  type DockerAgentResult,
+  resolveAgentModels,
+  resolveNamedModels,
+} from "../src/team-models.ts";
 
 const TEAM_CONFIG = "/teams/sample/team.yaml";
 
@@ -81,5 +85,28 @@ describe("resolveAgentModels", () => {
     expect(() => resolveAgentModels(TEAM_CONFIG, [], () => succeedWith("models: {}\n"))).toThrow(
       "unexpected output",
     );
+  });
+});
+
+describe("resolveNamedModels", () => {
+  // Catches reading the effort from the wrong place, or dropping it: validate:teams compares it
+  // with the effort-<level> flavor's name, so a model with no effort must say so, not read as a match.
+  test("returns each named model's id and its reasoning effort", () => {
+    const named = resolveNamedModels(TEAM_CONFIG, [], () => succeedWith(NAMED_MODELS_CONFIG));
+    expect(named).toEqual({
+      coordinator_model: { modelId: "claude-sonnet-5-5", reasoningEffort: undefined },
+      builder_model: { modelId: "claude-haiku-5-5", reasoningEffort: "high" },
+    });
+  });
+
+  test("passes the flavors as --flavor, in order", () => {
+    const seen: string[][] = [];
+    resolveNamedModels(TEAM_CONFIG, ["model-haiku", "effort-low"], (dockerAgentArguments) => {
+      seen.push(dockerAgentArguments);
+      return succeedWith(NAMED_MODELS_CONFIG);
+    });
+    expect(seen).toEqual([
+      ["debug", "config", TEAM_CONFIG, "--flavor", "model-haiku", "--flavor", "effort-low"],
+    ]);
   });
 });

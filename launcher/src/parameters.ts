@@ -22,19 +22,23 @@ export function describeInvalidParameterValue(
   return undefined;
 }
 
+/** What each tuning option picks, for its error message. */
+const CHOICE_DESCRIPTIONS = { model: "a model tier", effort: "an effort" } as const;
+
 /**
- * Returns why the effort is not one of the team's flavors, or undefined when it is.
- * An undefined effort means "the team's defaults" and is always valid.
+ * Returns why the value is not one the team offers for `--model` or `--effort`, or undefined when
+ * it is. An undefined value means "the team's defaults" and is always valid.
  */
-export function describeInvalidEffort(
-  effort: string | undefined,
-  flavorNames: string[],
+export function describeInvalidChoice(
+  optionName: keyof typeof CHOICE_DESCRIPTIONS,
+  value: string | undefined,
+  offeredValues: string[],
 ): string | undefined {
-  if (effort === undefined || flavorNames.includes(effort)) {
+  if (value === undefined || offeredValues.includes(value)) {
     return undefined;
   }
-  if (flavorNames.length === 0) {
-    return `--effort '${effort}': this team defines no flavors in its team.yaml`;
+  if (offeredValues.length === 0) {
+    return `--${optionName} '${value}': this team offers no ${optionName} choices (its team.yaml has no ${optionName}-* flavors; run bun run flavors)`;
   }
-  return `--effort '${effort}' is not a flavor of this team; choose one of: ${flavorNames.join(", ")}`;
+  return `--${optionName} '${value}' is not ${CHOICE_DESCRIPTIONS[optionName]} of this team; choose one of: ${offeredValues.join(", ")}`;
 }

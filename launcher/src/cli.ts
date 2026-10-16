@@ -18,6 +18,7 @@ import { basename, join, resolve } from "node:path";
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
 import { formatBanner } from "./banner.ts";
 import { readPathValue } from "./environment.ts";
+import { EFFORT_FLAVOR_PREFIX, MODEL_FLAVOR_PREFIX } from "./flavor-catalog.ts";
 import {
   inspectWorktreePath,
   listOpenIssuesWithLabel,
@@ -30,7 +31,7 @@ import {
 } from "./git.ts";
 import type { EntryPointDefinition, WorkflowManifest } from "./manifest.ts";
 import { readPackageInfo } from "./package-info.ts";
-import { describeInvalidEffort, describeInvalidParameterValue } from "./parameters.ts";
+import { describeInvalidChoice, describeInvalidParameterValue } from "./parameters.ts";
 import {
   buildLaunchPlan,
   type LaunchPlan,
@@ -77,8 +78,9 @@ const SETUP_COMMAND = "setup";
 // Switches that only mean something to `j5 setup`; anywhere else they are a usage error.
 const SETUP_ONLY_SWITCH_NAMES = ["check", "proxy", "login"] as const;
 
-// Value of the effort choice that passes no --flavor. Empty because a flavor name never is.
-const TEAM_DEFAULT_EFFORT_CHOICE = "";
+// Value of a model or effort choice that passes no --flavor. Empty because a tier or level name
+// never is.
+const TEAM_DEFAULT_CHOICE = "";
 
 // Queue runs: their logs and summary go under <project>/.j5/queue/<start time>/, the
 // same .j5/ directory test-quality's audit reports use.
@@ -126,14 +128,15 @@ function formatUsage(): string {
     "",
     "Usage:",
     "  j5                                    pick everything interactively",
-    `  j5 ${LIST_COMMAND}                               teams, entry points, parameters, efforts`,
+    `  j5 ${LIST_COMMAND}                               teams, entry points, parameters, models, efforts`,
     `  j5 ${SETUP_COMMAND} [--check] [--proxy] [--login]     check this machine, install the skills, optionally start the proxy`,
     "  j5 <team> [<entrypoint>] [options] [--<parameter> <value>]... [-- <docker agent run flags>]",
     "",
     "Options:",
     "  --project <path>   checkout to work on (default: the current directory's git repository)",
     "  --base <ref>       branch a new worktree from this ref (default: the remote default branch)",
-    "  --effort <flavor>  one of the team's flavors in team.yaml (default: the team's defaults)",
+    "  --model <tier>     model tier for the team's builders: haiku, sonnet or opus, as the team offers (default: team.yaml as written)",
+    "  --effort <level>   reasoning effort: low, medium, high or xhigh, as the team offers (default: team.yaml as written)",
     "  --queue <n,n,...>  run the entry point once per value, unattended (entry points with a queue)",
     "  --queue-label <l>  the same, over every open issue with this label (needs gh access to the repo)",
     "  --max-rounds <n>   fix rounds per queue item, or 'none' for no limit (default 5)",
@@ -147,7 +150,7 @@ function formatUsage(): string {
     "  --login            also open Pi to log the proxy in to your own Claude account (implies --proxy)",
     "",
     "Examples:",
-    "  j5 issue-team work-issue --issue 123 --effort low",
+    "  j5 issue-team work-issue --issue 123 --model haiku --effort medium",
     "  j5 pr-reviewer review --pr 456 --project ~/code/app -- --safety balanced",
     "  j5 issue-team work-issue --queue 474,480 --max-rounds 5",
   ].join("\n");
@@ -159,10 +162,13 @@ function describeEntryPointParameters(entryPoint: EntryPointDefinition): string 
     .join(" ");
 }
 
+function describeOffer(offered: string[]): string {
+  return offered.length === 0 ? "none (team.yaml as written only)" : offered.join(", ");
+}
+
 function formatTeamList(teams: WorkflowManifest[]): string {
   const sections = teams.map((team) => {
-    const { flavorNames } = readTeamConfigSummary(team.teamConfigPath);
-    const efforts = flavorNames.length === 0 ? "none (team defaults only)" : flavorNames.join(", ");
+    const { modelTiers, effortLevels } = readTeamConfigSummary(team.teamConfigPath);
     const entryPointLines = Object.entries(team.entrypoints).map(([entryPointName, entryPoint]) => {
       // An entry point without parameters gets no separator, so no trailing space.
       const usage = [entryPointName, describeEntryPointParameters(entryPoint)]
@@ -170,9 +176,12 @@ function formatTeamList(teams: WorkflowManifest[]): string {
         .join(" ");
       return `  ${usage}\n      ${entryPoint.description}`;
     });
-    return [`${team.name} — ${team.description}`, ...entryPointLines, `  efforts: ${efforts}`].join(
-      "\n",
-    );
+    return [
+      `${team.name} — ${team.description}`,
+      ...entryPointLines,
+      `  models: ${describeOffer(modelTiers)}`,
+      `  efforts: ${describeOffer(effortLevels)}`,
+    ].join("\n");
   });
   return sections.join("\n\n");
 }
@@ -272,28 +281,34 @@ async function chooseProjectRoot(
   return resolveGitToplevel(resolve(answer));
 }
 
-async function chooseEffort(
-  team: WorkflowManifest,
-  requestedEffort: string | undefined,
+// One of the two launch options that pick a standard flavor (`--model` -> `model-<tier>`,
+// `--effort` -> `effort-<level>`). Returns the flavor name, or undefined for team.yaml as written.
+async function chooseTuningFlavor(
+  optionName: "model" | "effort",
+  flavorPrefix: string,
+  offeredValues: string[],
+  requestedValue: string | undefined,
   interaction: Interaction,
 ): Promise<string | undefined> {
-  const { flavorNames } = readTeamConfigSummary(team.teamConfigPath);
-  if (requestedEffort !== undefined) {
-    const problem = describeInvalidEffort(requestedEffort, flavorNames);
+  if (requestedValue !== undefined) {
+    const problem = describeInvalidChoice(optionName, requestedValue, offeredValues);
     if (problem !== undefined) {
       throw new UsageError(problem);
     }
-    return requestedEffort;
+    return `${flavorPrefix}${requestedValue}`;
   }
-  if (!interaction.canPrompt || flavorNames.length === 0) {
+  if (!interaction.canPrompt || offeredValues.length === 0) {
     return undefined;
   }
   interaction.askedAnything = true;
-  const chosenEffort = await askToChoose("Effort (docker-agent flavor)", [
-    { value: TEAM_DEFAULT_EFFORT_CHOICE, label: "default", hint: "team.yaml as written" },
-    ...flavorNames.map((flavorName) => ({ value: flavorName, label: flavorName })),
-  ]);
-  return chosenEffort === TEAM_DEFAULT_EFFORT_CHOICE ? undefined : chosenEffort;
+  const chosenValue = await askToChoose(
+    optionName === "model" ? "Model tier (docker-agent flavor)" : "Effort (docker-agent flavor)",
+    [
+      { value: TEAM_DEFAULT_CHOICE, label: "default", hint: "team.yaml as written" },
+      ...offeredValues.map((offeredValue) => ({ value: offeredValue, label: offeredValue })),
+    ],
+  );
+  return chosenValue === TEAM_DEFAULT_CHOICE ? undefined : `${flavorPrefix}${chosenValue}`;
 }
 
 async function chooseBaseRef(
@@ -563,13 +578,32 @@ async function launch(
     entryPoint.worktree.mode === "new"
       ? await chooseBaseRef(projectRoot, requestedBaseRef, interaction)
       : undefined;
-  const effort = await chooseEffort(team, parsedArguments.optionValues.get("effort"), interaction);
+  const { modelTiers, effortLevels } = readTeamConfigSummary(team.teamConfigPath);
+  const modelFlavor = await chooseTuningFlavor(
+    "model",
+    MODEL_FLAVOR_PREFIX,
+    modelTiers,
+    parsedArguments.optionValues.get("model"),
+    interaction,
+  );
+  const effortFlavor = await chooseTuningFlavor(
+    "effort",
+    EFFORT_FLAVOR_PREFIX,
+    effortLevels,
+    parsedArguments.optionValues.get("effort"),
+    interaction,
+  );
+  // Model before effort, which is arbitrary (they patch different keys); the reviewer's flavor,
+  // chosen next, must come after both so it sees the models they set.
+  const userFlavors = [modelFlavor, effortFlavor].filter(
+    (flavorName): flavorName is string => flavorName !== undefined,
+  );
   // For a team that keeps its reviewer independent of its builders, choose the reviewer's model
-  // tier now, from the models the effort sets, and stop before any worktree exists if it cannot be
-  // done. docker-agent is asked for the real, merged models; see launcher/src/reviewer-flavor.ts.
+  // tier now, from the models those flavors set, and stop before any worktree exists if it cannot
+  // be done. docker-agent is asked for the real, merged models; see launcher/src/reviewer-flavor.ts.
   const automaticFlavors = chooseAutomaticFlavors(
     team,
-    effort,
+    userFlavors,
     parsedArguments.passthroughArguments,
     createDockerAgentRunner(team.directory),
   );
@@ -601,8 +635,7 @@ async function launch(
       projectRoot,
       repositoryName,
       parameterValues: values,
-      effort,
-      automaticFlavors: automaticFlavors.flavorNames,
+      flavorNames: [...userFlavors, ...automaticFlavors.flavorNames],
       baseRef,
       worktree: resolveWorktreeFacts(
         team,

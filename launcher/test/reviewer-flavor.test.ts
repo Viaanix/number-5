@@ -96,9 +96,12 @@ function standInDockerAgent(
 }
 
 const PATCHES: Record<string, ModelPatch> = {
-  low: { builder: "claude-haiku-5-5" },
-  max: { builder: "claude-opus-4-7" },
-  top: { builder: "claude-fable-5-1" },
+  "model-haiku": { builder: "claude-haiku-5-5" },
+  "model-sonnet": { builder: "claude-sonnet-5-5" },
+  "model-opus": { builder: "claude-opus-4-7" },
+  "model-fable": { builder: "claude-fable-5-1" },
+  // An effort flavor patches no model id, so it must never move a tier.
+  "effort-xhigh": {},
   "reviewer-on-sonnet": { reviewer: "claude-sonnet-5-5" },
   "reviewer-on-opus": { reviewer: "claude-opus-4-7" },
   "reviewer-on-haiku": { reviewer: "claude-haiku-5-5" },
@@ -111,7 +114,7 @@ describe("chooseAutomaticFlavors", () => {
   test("puts the reviewer one tier above the default builders", () => {
     const choice = chooseAutomaticFlavors(
       loadTeam(SONNET_AND_OPUS),
-      undefined,
+      [],
       [],
       standInDockerAgent(PATCHES),
     );
@@ -121,16 +124,27 @@ describe("chooseAutomaticFlavors", () => {
     );
   });
 
-  // The point of choosing after the effort: `low` moves the builders to Haiku, which would
-  // otherwise leave a reviewer chosen for Sonnet builders two tiers away (or on the wrong side).
-  test("reads the builders' tier after the effort has been applied", () => {
+  // The point of choosing after the user's flavors: `--model haiku` moves the builders to Haiku,
+  // which would otherwise leave a reviewer chosen for Sonnet builders on the wrong side.
+  test("reads the builders' tier after --model has been applied", () => {
     const choice = chooseAutomaticFlavors(
       loadTeam(SONNET_AND_OPUS),
-      "low",
+      ["model-haiku"],
       [],
       standInDockerAgent(PATCHES),
     );
     expect(choice.flavorNames).toEqual(["reviewer-on-sonnet"]);
+  });
+
+  // --effort only sets reasoning effort; it must not change which tier the reviewer gets.
+  test("an effort flavor alone leaves the reviewer one tier above the default builders", () => {
+    const choice = chooseAutomaticFlavors(
+      loadTeam(SONNET_AND_OPUS),
+      ["effort-xhigh"],
+      [],
+      standInDockerAgent(PATCHES),
+    );
+    expect(choice.flavorNames).toEqual(["reviewer-on-opus"]);
   });
 
   // Fable is not offered here, as in issue-team: an Opus builder has nothing above it, so the
@@ -138,7 +152,7 @@ describe("chooseAutomaticFlavors", () => {
   test("reviews an Opus builder from below when Fable is not on offer", () => {
     const choice = chooseAutomaticFlavors(
       loadTeam(SONNET_AND_OPUS),
-      "max",
+      ["model-opus"],
       [],
       standInDockerAgent(PATCHES),
     );
@@ -148,26 +162,28 @@ describe("chooseAutomaticFlavors", () => {
   test("moves a Fable builder's reviewer down to Opus, and an Opus builder's up to Fable when offered", () => {
     const withFable = loadTeam([...SONNET_AND_OPUS, "reviewer-on-fable"]);
     expect(
-      chooseAutomaticFlavors(withFable, "top", [], standInDockerAgent(PATCHES)).flavorNames,
+      chooseAutomaticFlavors(withFable, ["model-fable"], [], standInDockerAgent(PATCHES))
+        .flavorNames,
     ).toEqual(["reviewer-on-opus"]);
     expect(
-      chooseAutomaticFlavors(withFable, "max", [], standInDockerAgent(PATCHES)).flavorNames,
+      chooseAutomaticFlavors(withFable, ["model-opus"], [], standInDockerAgent(PATCHES))
+        .flavorNames,
     ).toEqual(["reviewer-on-fable"]);
   });
 
-  // Catches the reviewer flavor landing before the effort: docker-agent applies flavors in the
-  // order given, and the first read must see the effort alone.
-  test("asks docker-agent with the effort alone, then with the effort and the reviewer flavor", () => {
+  // Catches the reviewer flavor landing before the user's: docker-agent applies flavors in the
+  // order given, and the first read must see --model and --effort alone, in the order given.
+  test("asks docker-agent with the user's flavors alone, then with the reviewer flavor after them", () => {
     const calls: string[][] = [];
     chooseAutomaticFlavors(
       loadTeam(SONNET_AND_OPUS),
-      "low",
+      ["model-haiku", "effort-xhigh"],
       [],
       standInDockerAgent(PATCHES, { calls }),
     );
     expect(calls.map((call) => call.slice(3).join(" "))).toEqual([
-      "--flavor low",
-      "--flavor low --flavor reviewer-on-sonnet",
+      "--flavor model-haiku --flavor effort-xhigh",
+      "--flavor model-haiku --flavor effort-xhigh --flavor reviewer-on-sonnet",
     ]);
   });
 
@@ -178,7 +194,7 @@ describe("chooseAutomaticFlavors", () => {
     const choose = () =>
       chooseAutomaticFlavors(
         team,
-        undefined,
+        [],
         [],
         standInDockerAgent(PATCHES, {
           base: { reviewer: "claude-sonnet-5-5" },
@@ -191,7 +207,7 @@ describe("chooseAutomaticFlavors", () => {
 
   test("refuses when the team offers no tier different from the builders", () => {
     const team = loadTeam(["reviewer-on-sonnet"]);
-    expect(() => chooseAutomaticFlavors(team, undefined, [], standInDockerAgent(PATCHES))).toThrow(
+    expect(() => chooseAutomaticFlavors(team, [], [], standInDockerAgent(PATCHES))).toThrow(
       "no reviewer tier differs",
     );
   });
@@ -201,7 +217,7 @@ describe("chooseAutomaticFlavors", () => {
     expect(() =>
       chooseAutomaticFlavors(
         team,
-        undefined,
+        [],
         [],
         standInDockerAgent(PATCHES, { base: { builder: "gpt-5" } }),
       ),
@@ -218,7 +234,7 @@ describe("chooseAutomaticFlavors", () => {
   ])("refuses %p after '--'", (passthrough, conflicting) => {
     const team = loadTeam(SONNET_AND_OPUS);
     expect(() =>
-      chooseAutomaticFlavors(team, undefined, passthrough, standInDockerAgent(PATCHES)),
+      chooseAutomaticFlavors(team, [], passthrough, standInDockerAgent(PATCHES)),
     ).toThrow(`${conflicting} after '--' would change the models`);
   });
 
@@ -227,7 +243,7 @@ describe("chooseAutomaticFlavors", () => {
     expect(
       chooseAutomaticFlavors(
         team,
-        undefined,
+        [],
         ["--safety", "balanced", "--exec"],
         standInDockerAgent(PATCHES),
       ).flavorNames,
@@ -242,7 +258,12 @@ describe("chooseAutomaticFlavors", () => {
     );
     const calls: string[][] = [];
     expect(
-      chooseAutomaticFlavors(team, "low", ["--model", "x"], standInDockerAgent(PATCHES, { calls })),
+      chooseAutomaticFlavors(
+        team,
+        ["model-haiku"],
+        ["--model", "x"],
+        standInDockerAgent(PATCHES, { calls }),
+      ),
     ).toEqual({ flavorNames: [], explanation: undefined });
     expect(calls).toEqual([]);
   });
@@ -250,7 +271,7 @@ describe("chooseAutomaticFlavors", () => {
   test("reports docker-agent's own error when it cannot read the team", () => {
     const team = loadTeam(SONNET_AND_OPUS);
     expect(() =>
-      chooseAutomaticFlavors(team, undefined, [], () => ({
+      chooseAutomaticFlavors(team, [], [], () => ({
         exitCode: 1,
         standardOutput: "",
         standardError: "no such file: team.yaml",
