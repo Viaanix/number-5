@@ -12,9 +12,10 @@ const POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
 const QUEUE_SEPARATOR = ",";
 const NO_ROUND_LIMIT_WORD = "none";
 
-// `RESULT: PR <url>` or `RESULT: FAILED <reason>`, alone on a line, as the queue
-// preamble in workflow.yaml asks the agent to end with.
-const RESULT_LINE_PATTERN = /^RESULT: (?:PR (\S+)|FAILED (.+))$/gm;
+// `RESULT: PR <url>`, `RESULT: DONE <what was done>` or `RESULT: FAILED <reason>`, alone on a line,
+// as the queue preamble in workflow.yaml asks the agent to end with. DONE is for a team whose
+// work is not a pull request (the triage team labels or splits an issue).
+const RESULT_LINE_PATTERN = /^RESULT: (?:PR (\S+)|DONE (.+)|FAILED (.+))$/gm;
 
 // What docker-agent prints when the agent process itself could not run (e.g. the
 // Claude session limit: "… harness claude-code failed: wait: exit status 1"), or a
@@ -33,6 +34,8 @@ export const DEFAULT_ROUND_LIMIT: RoundLimit = { kind: "limited", rounds: 5 };
 /** How one queue item ended. */
 export type QueueItemOutcome =
   | { kind: "pull-request"; url: string }
+  /** The work finished and is not a pull request. */
+  | { kind: "done"; detail: string }
   | { kind: "failed"; reason: string }
   /** The agent could not run at all; the queue stops here. */
   | { kind: "stopped"; reason: string };
@@ -98,9 +101,12 @@ export function readResultLine(output: string): QueueItemOutcome | undefined {
   let lastOutcome: QueueItemOutcome | undefined;
   for (const match of output.matchAll(RESULT_LINE_PATTERN)) {
     const pullRequestUrl = match[1];
-    const failureReason = match[2];
+    const doneDetail = match[2];
+    const failureReason = match[3];
     if (pullRequestUrl !== undefined) {
       lastOutcome = { kind: "pull-request", url: pullRequestUrl };
+    } else if (doneDetail !== undefined) {
+      lastOutcome = { kind: "done", detail: doneDetail.trim() };
     } else if (failureReason !== undefined) {
       lastOutcome = { kind: "failed", reason: failureReason.trim() };
     }
@@ -136,15 +142,23 @@ export function classifyQueueItem(exitCode: number, output: string): QueueItemOu
   };
 }
 
-/** True only when every item opened a pull request; the queue's exit code is 0 then. */
+/** True only when every item opened a pull request or finished; the queue's exit code is 0 then. */
 export function everyItemSucceeded(reports: QueueItemReport[]): boolean {
-  return reports.length > 0 && reports.every((report) => report.outcome.kind === "pull-request");
+  return (
+    reports.length > 0 &&
+    reports.every(
+      (report) => report.outcome.kind === "pull-request" || report.outcome.kind === "done",
+    )
+  );
 }
 
 function describeOutcome(report: QueueItemReport): string {
   const outcome = report.outcome;
   if (outcome.kind === "pull-request") {
     return `PR ${outcome.url}`;
+  }
+  if (outcome.kind === "done") {
+    return `DONE: ${outcome.detail}`;
   }
   if (outcome.kind === "failed") {
     return `FAILED: ${outcome.reason}`;
@@ -167,10 +181,17 @@ export function formatQueueSummary(
   const pullRequestCount = reports.filter(
     (report) => report.outcome.kind === "pull-request",
   ).length;
+  const doneCount = reports.filter((report) => report.outcome.kind === "done").length;
+  // A queue of pull requests keeps its original headline; a queue with finished-but-not-PR items
+  // counts both kinds.
+  const headline =
+    doneCount === 0
+      ? `${pullRequestCount} of ${reports.length} opened a pull request.`
+      : `${pullRequestCount + doneCount} of ${reports.length} finished (${pullRequestCount} opened a pull request, ${doneCount} completed without one).`;
   const lines = [
     `# ${title}`,
     "",
-    `${pullRequestCount} of ${reports.length} opened a pull request.`,
+    headline,
     "",
     ...reports.map(
       (report) =>

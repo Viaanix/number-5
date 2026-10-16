@@ -66,6 +66,22 @@ describe("readResultLine and classifyQueueItem", () => {
     });
   });
 
+  // Catches a team whose work is not a pull request (triage) never being able to succeed in a
+  // queue: its last line is DONE, which used to read as "no RESULT line".
+  test("reads a DONE line as a finished item that opened no pull request", () => {
+    expect(readResultLine("labeled it\nRESULT: DONE needs-info #12: asked 3 questions\n")).toEqual({
+      kind: "done",
+      detail: "needs-info #12: asked 3 questions",
+    });
+  });
+
+  test("lets a DONE line win over a non-zero exit, like the other RESULT lines", () => {
+    expect(classifyQueueItem(1, "RESULT: DONE ready #7: one pull request of work")).toEqual({
+      kind: "done",
+      detail: "ready #7: one pull request of work",
+    });
+  });
+
   // Catches the first RESULT line winning: an agent may quote the format early (as
   // the prompt does) and report its real outcome at the end.
   test("uses the last RESULT line", () => {
@@ -147,6 +163,38 @@ describe("formatQueueSummary and everyItemSucceeded", () => {
     expect(everyItemSucceeded([pullRequestReport])).toBe(true);
     expect(everyItemSucceeded([])).toBe(false);
   });
+
+  // Catches issue-team's summary changing: with no DONE items the headline is the one a queue of
+  // pull requests always had.
+  test("keeps the pull-request headline when no item is DONE", () => {
+    expect(formatQueueSummary("Queue", [pullRequestReport], false)).toContain(
+      "1 of 1 opened a pull request.",
+    );
+  });
+
+  test("counts DONE items as finished in the headline, and as a success in the exit code", () => {
+    const doneReport: QueueItemReport = {
+      value: "12",
+      outcome: { kind: "done", detail: "needs-info #12: asked 3 questions" },
+      logPath: "/p/.j5/queue/t/issue-12.log",
+    };
+
+    const summary = formatQueueSummary("Queue", [pullRequestReport, doneReport], false);
+
+    expect(summary).toContain(
+      "2 of 2 finished (1 opened a pull request, 1 completed without one).",
+    );
+    expect(summary).toContain(
+      "- #12: DONE: needs-info #12: asked 3 questions (log: /p/.j5/queue/t/issue-12.log)",
+    );
+    expect(everyItemSucceeded([doneReport])).toBe(true);
+    const failedReport: QueueItemReport = {
+      value: "13",
+      outcome: { kind: "failed", reason: "no RESULT line" },
+      logPath: undefined,
+    };
+    expect(everyItemSucceeded([doneReport, failedReport])).toBe(false);
+  });
 });
 
 // Every queue preamble quotes the RESULT lines it asks for. If docker-agent prints the
@@ -180,7 +228,8 @@ describe("queue preambles in the real manifests", () => {
       }
       const preamble = fillTemplate(entryPoint.queue?.preamble ?? "", values);
       const message = fillTemplate(entryPoint.message, values);
-      expect(preamble).toContain("RESULT: PR");
+      expect(preamble).toMatch(/RESULT: (?:PR|DONE) /);
+      expect(preamble).toContain("RESULT: FAILED");
       expect(readResultLine(`${preamble}\n\n${message}`)).toBeUndefined();
     },
   );
