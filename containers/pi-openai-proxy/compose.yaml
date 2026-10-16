@@ -3,10 +3,11 @@ name: j5-pi-openai-proxy
 services:
   proxy:
     # The tag is the single source for the published image: .github/workflows/proxy-image.yml
-    # reads it from here. Bump the last number when the Dockerfile, package.json, bun.lock or
-    # patch-usage.ts change; CI refuses to overwrite a tag that is already published, so a
-    # machine can never keep running an older build under the same tag.
-    image: ghcr.io/viaanix/j5-pi-openai-proxy:4.9.5-1
+    # reads it from here. Bump the last number when the Dockerfile, package.json or bun.lock
+    # change; CI refuses to overwrite a tag that is already published, so a machine can never
+    # keep running an older build under the same tag. 4.9.6 is the version of the fork build in
+    # package.json (vx-daniel/pi-openai-proxy), not upstream's unpublished 4.9.6.
+    image: ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-1
     build:
       context: .
     init: true
@@ -16,9 +17,6 @@ services:
       - "127.0.0.1:${PI_PROXY_PORT:-4141}:4141"
     volumes:
       - pi-auth:/home/bun/.pi/agent
-    configs:
-      - source: models
-        target: /home/bun/.pi/agent/models.json
     read_only: true
     tmpfs:
       - /tmp
@@ -36,10 +34,6 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
-
-configs:
-  models:
-    file: ./models.json
 
 volumes:
   pi-auth:

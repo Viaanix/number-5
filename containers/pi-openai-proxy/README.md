@@ -8,31 +8,39 @@ credential handling. This does not change the existing Claude Code harness workf
 ## Pinned components
 
 - Bun 1.4.2, with the base image pinned by multi-platform digest.
-- pi-openai-proxy 4.9.5.
-- Pi CLI 0.73.0 for subscription login.
+- The proxy: a build of the fork [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy)
+  (release `v4.9.6-j5.1`, fork `main` at `e045a70`): upstream 4.9.6 plus the Pi 1.x port, the
+  `prompt_tokens` fix and a `chat_request` log line. It is installed from the release asset URL in
+  `package.json`, and `bun.lock` records the tarball's hash.
+- Pi 1.3.0 (`@earendil-works/pi-ai`, `pi-coding-agent`, `pi-tui`): the model adapter and the CLI used
+  for subscription login. Its Anthropic client identifies as Claude Code 2.1.280.
 - Every resolved dependency is recorded in `bun.lock`; builds use a frozen lockfile
-  and do not run dependency lifecycle scripts. Pi's model adapter resolves to 0.73.1.
+  and do not run dependency lifecycle scripts.
 
-The build context permits only `package.json`, `bun.lock` and `patch-usage.ts`. Credentials and the
-host's Pi configuration/extensions are not copied into the image or bind-mounted.
-Compose mounts this repository's `models.json` read-only, separately from the
-named login volume.
+The build context permits only `package.json` and `bun.lock`. Credentials and the
+host's Pi configuration/extensions are not copied into the image or bind-mounted. No model
+catalogue file is mounted: see the next section.
 
 ## Current models
 
-The pinned Pi release predates the current Claude catalogue. The versioned
-`models.json` adds `claude-sonnet-5-5` and `claude-haiku-5-5` through Pi's supported
-custom-model configuration, retaining the existing subscription login. Its
-context/output limits come from the official [Sonnet 5.5](https://platform.claude.com/docs/en/models/sonnet-5-5/overview)
-and [Haiku 5.5](https://platform.claude.com/docs/en/models/haiku-5-5/overview) pages.
-Catalogue metadata is not a guarantee of account access or complete feature parity.
+Pi 1.x ships the current Claude catalogue as built-in definitions, including `claude-haiku-5-5`,
+`claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1`, with the metadata that selects
+adaptive thinking. The image therefore has **no `models.json`**: a hand-written entry for a model
+Pi already knows replaces its built-in definition and drops that metadata, which sends the legacy
+token-budget form of thinking and makes `xhigh` the same as `high` on Sonnet and Haiku (receipts in
+[the gotchas](../../docs/docker-agent/gotchas.md#our-modelsjson-entries-replace-pis-built-in-model-definitions-and-with-them-adaptive-effort)).
+Add a `models.json` only for a model Pi does not list, and check what Pi sends for it.
+Catalogue presence is not a guarantee of account access or complete feature parity.
 
-Current models need explicit adaptive reasoning through this pinned adapter.
+Through the image built from this directory (2026-10-16, Pi 1.3.0), the request Pi sends for
+`claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1` is adaptive
+thinking with the level carried as a managed-effort message, and `claude-opus-4-7` sends
+`output_config.effort`; all four levels (`low`, `medium`, `high`, `xhigh`) differ on all five.
+
 Docker Agent does not map `thinking_budget` to `reasoning_effort` for a Claude
 model using its OpenAI client. Set `provider_opts.extra_body.reasoning_effort`
-instead; pr-reviewer sets `high` for Sonnet and `medium` for its Haiku flavor.
-Without explicit effort, the adapter sends `thinking: disabled`, which Sonnet 5.5
-rejects. See the live receipt below.
+instead; every team here sets it. With Pi 0.73 and no effort the adapter sent
+`thinking: disabled`, which Sonnet 5.5 rejects; that was not re-checked on Pi 1.x.
 
 ## Get the image
 
@@ -71,7 +79,7 @@ export PI_PROXY_AUTH_TOKEN="$(openssl rand -hex 32)"
 docker compose pull   # or `docker compose build`, which needs no registry login
 
 docker compose run --rm --no-deps --entrypoint bun proxy \
-  /app/node_modules/@mariozechner/pi-coding-agent/dist/cli.js \
+  /app/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js \
   --no-session --no-tools --no-extensions --offline
 ```
 
@@ -96,11 +104,14 @@ This preserves other entries. If the token already has an entry, reuse it rather
 than appending another one or generating a new value. Do not put this file in
 the repository. A missing local bearer token does not require another Claude login.
 
-Inside Pi, enter `/login`, select **Use a subscription**, then **Anthropic (Claude
-Pro/Max)**. Open the displayed authorization URL in your host browser. The login
+Inside Pi, enter `/login`. Pi 1.x lists providers ("Select provider to configure"): choose
+**Anthropic**, then **Browser login** (or **Copy code login (headless)** on a machine without a
+browser). Open the displayed authorization URL in your host browser. The login
 container does not publish an OAuth callback port; if the browser redirects to an
-unreachable localhost URL, paste the complete redirect URL into Pi's manual input.
+unreachable localhost URL, paste the complete redirect URL or code into Pi's manual input.
 Exit Pi when login completes. Do not paste credentials into chat or commit them.
+The menu above was read from Pi 1.3.0's screen on 2026-10-16 without completing a login; the
+login flow itself has not been run on Pi 1.x.
 
 `--offline` disables Pi's startup downloads, not the interactive login request.
 Warnings about missing `fd` and `ripgrep` are expected: this image uses Pi for
@@ -176,34 +187,35 @@ The upstream adapter has a restricted tool-schema subset, omits Anthropic
 `response_format`, and does not forward thinking events into its SSE output.
 A model listing alone does not establish compatibility with a team's tools.
 
-## Local patch: token usage
+## Token usage
 
-The pinned proxy reports Pi's `input` as `prompt_tokens`, which for Anthropic is only the
-uncached input. With prompt caching, a ~9,650-token prompt came back as `prompt_tokens: 4`,
-`completion_tokens: 4`, `total_tokens: 9650`, so Docker Agent's token display, context size
-and compaction trigger saw about 0.04% of the real context and its counters never accumulated
+Pi reports its `input` as the uncached input only: with Anthropic prompt caching, cache reads and
+writes arrive separately. Upstream 4.9.5 passed `input` through as OpenAI's `prompt_tokens`, so with
+caching a ~9,650-token prompt came back as `prompt_tokens: 4`, `completion_tokens: 4`,
+`total_tokens: 9650`, and Docker Agent's token display, context size and compaction trigger saw about
+0.04% of the real context and its counters never accumulated
 ([gotcha](../../docs/docker-agent/gotchas.md#token-counters-through-the-proxy-ignore-cached-input-so-compaction-cannot-trigger)).
 
-`patch-usage.ts` runs at build time and replaces `mapUsage()` so `prompt_tokens` includes cache
-reads and writes, with `prompt_tokens_details.cached_tokens` and `cache_write_tokens` for Docker
-Agent to subtract. It must match exactly one function: if the pinned package changes, the build
-fails instead of shipping an unpatched proxy.
+The fork build fixes `mapUsage()` in its source: `prompt_tokens` is `input + cacheRead +
+cacheWrite`, with `prompt_tokens_details.cached_tokens` and `cache_write_tokens` for Docker Agent to
+subtract. This replaced a build-time patch (`patch-usage.ts`, removed with the Pi 1.x move), so
+there is no step here that can silently stop matching. The fork's unit tests pin the mapping for both
+the non-streamed and the streamed usage chunk, and CI's smoke test checks the shipped file still
+contains `prompt_tokens_details`.
 
-Checked offline in a throwaway container (no network, no login): the patched file differs from
-the original only in that function, 4 + 9000 + 642 input tokens give `prompt_tokens` 9646 with
-`completion_tokens` 4 and `total_tokens` 9650, and running the patch step a second time exits 1.
-
-Checked end to end on 2026-10-15, after `docker compose build` and a recreate: a streamed request
-with a ~9,650-token prompt returned `prompt_tokens` 9646, `completion_tokens` 4, `total_tokens` 9650
-(it was `prompt_tokens` 4 before the patch), with `cache_write_tokens` 9642 on the first call and
-`cached_tokens` 9642 on repeats; the non-streamed response agreed. Not yet watched: a real run's
-token counter accumulating in the Docker Agent sidebar.
+Checked end to end on 2026-10-16, through this directory's image run with the compose settings
+(read-only root, no capabilities, `no-new-privileges`) and a copy of a Claude login: a ~13k-token
+prompt on `claude-sonnet-5-5` returned `prompt_tokens` 13,367 (4 uncached + 13,363) with
+`cache_write_tokens` 13,363 on the first streamed call and `cached_tokens` 13,363 on the second
+streamed call and on a non-streamed call. Earlier (2026-10-15, with the build-time patch on 4.9.5)
+a ~9,650-token prompt gave `prompt_tokens` 9,646. Not yet watched: a real run's token counter
+accumulating in the Docker Agent sidebar.
 
 ## Upstream status and the fork
 
-Treat `@victor-software-house/pi-openai-proxy` as abandoned: 4.9.5 is the latest release (published 2026-05-06), the repository's last push was 2026-06-08, and there is no open issue about what we patch. We keep it pinned and carry small build-time patches (`patch-usage.ts`), each of which fails the build if the package stops matching.
+Treat `@victor-software-house/pi-openai-proxy` as abandoned: 4.9.5 is the latest npm release (published 2026-05-06), the repository's last push was 2026-06-08, and there is no open issue about what we changed. This image runs a build of our fork, [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy), instead. Its PR #1 (merged 2026-10-16) ports the proxy to Pi 1.x (`ModelRuntime` replaces `AuthStorage` and `ModelRegistry.create()`) and fixes `prompt_tokens` at source; PR #2 adds a `chat_request` log line naming the requested and the resolved model of each chat request; PR #3 aligns its docs.
 
-A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy). Its [PR #1](https://github.com/vx-daniel/pi-openai-proxy/pull/1), merged 2026-10-16, ports the proxy to Pi 1.x (`ModelRuntime` replaces `AuthStorage` and `ModelRegistry.create()`) and fixes `prompt_tokens` at source, which replaces `patch-usage.ts`. **This image does not use it yet**: it still installs 4.9.5 from npm, and switching means publishing the fork, re-testing the live login under Pi 1.x, and trimming `models.json` (see the note under the table).
+**Updating the proxy build.** In the fork: `pnpm install --frozen-lockfile --ignore-scripts && pnpm pack`, then publish the tarball as a release asset (`gh release create <tag> <tgz> --target <commit>`). Here: point the URL in `package.json` at that asset, delete and regenerate `bun.lock` with `bun install` (Bun 1.4.2), and bump the image tag in `compose.yaml`. The lockfile records the tarball's hash, so the build fails if the asset changes.
 
 **Why Pi's version decides which models work.** The Opus 5.5 rejection comes from the client version Pi's Anthropic client sends (`user-agent: claude-cli/<version>`), not from this proxy. Read from the published `@earendil-works/pi-ai` packages (`claudeCodeVersion` in `dist`), checked 2026-10-16:
 
@@ -211,11 +223,9 @@ A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-o
 |---|---|---|
 | 0.75.0 to 0.84.4 (0.75.0, 0.80.9, 0.84.0, 0.84.3, 0.84.4 read) | 2.1.75 | Not Opus 5.5, not Fable 5.1 |
 | 0.85.0 to 0.86.0 (both read) | 2.1.251 | Fable 5.1's floor is 2.1.251 (from Anthropic's error message); not tried on these releases |
-| 1.0.0 to 1.3.0 (1.0.0, 1.1.0, 1.2.0, 1.3.0 read) | 2.1.280 | Opus 5.5 and Fable 5.1 answered through a container built from the fork's Pi 1.x branch, 2026-10-16 |
+| 1.0.0 to 1.3.0 (1.0.0, 1.1.0, 1.2.0, 1.3.0 read) | 2.1.280 | Opus 5.5 and Fable 5.1 answered through this directory's image, 2026-10-16 |
 
-Releases between the ones listed were not read. Anthropic's errors named 2.1.280 for Opus 5.5 and 2.1.251 for Fable 5.1 ([gotcha](../../docs/docker-agent/gotchas.md#opus-55-is-rejected-for-the-pi-proxys-subscription-login)).
-
-**Those probe requests used our hand-written `models.json` entries**, which replace Pi's built-in definitions and send the legacy token-budget form of thinking instead of adaptive effort. Pi 1.x already knows `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1`, so the image should stop listing them when it moves to Pi 1.x. The request bodies each setup sends are in the gotchas, in the entry about `models.json` added with the `--model`/`--effort` flavors.
+Releases between the ones listed were not read. Anthropic's errors named 2.1.280 for Opus 5.5 and 2.1.251 for Fable 5.1 ([gotcha](../../docs/docker-agent/gotchas.md#opus-55-is-rejected-for-the-pi-proxys-subscription-login)). CI's smoke test fails the build if the Pi in the image sends anything older than 2.1.280.
 
 ### Other forks reviewed (2026-10-16)
 
@@ -252,14 +262,15 @@ Billing is per token on an API key, not the subscription. Anthropic's recommenda
 ## Share it with the team (maintainers)
 
 **Publishing.** `.github/workflows/proxy-image.yml` runs when a build input changes
-(`Dockerfile`, `.dockerignore`, `package.json`, `bun.lock`, `patch-usage.ts`) or `compose.yaml`.
+(`Dockerfile`, `.dockerignore`, `package.json`, `bun.lock`) or `compose.yaml`.
 On a pull request it builds and smoke-tests only. On a push to `main` it also publishes the tag
-named in `compose.yaml`. The smoke test checks that the usage patch is in the shipped file, that
-the image exits 64 without a token, that it answers 401 to a missing or wrong bearer and 200 to the
-right one, and that it runs as UID 1000.
+named in `compose.yaml`. The smoke test checks that the shipped proxy reports `prompt_tokens_details`,
+that Pi's Anthropic client sends Claude Code 2.1.280 or newer, that the image exits 64 without a
+token, that it answers 401 to a missing or wrong bearer and 200 to the right one, and that it runs
+as UID 1000.
 
 **Bump the tag when a build input changes.** The last number in the `compose.yaml` image tag
-(`4.9.5-1`) is the revision. CI records a hash of the build inputs in an image label. If the
+(`4.9.6-1`) is the revision. CI records a hash of the build inputs in an image label. If the
 tag is already published from the same inputs it skips quietly, for example after a `compose.yaml`
 edit that is not a bump. If the inputs differ it fails and tells you to bump, because a machine
 that already pulled the old image under that tag would otherwise keep running it with no warning.
@@ -302,11 +313,45 @@ pull after being given Read. Have the first teammate try it and record the resul
 found, GitHub has no REST endpoint for a package's visibility or access, so changing them is a
 settings-page step.
 
-**Never publish a login.** The image is built from `package.json`, `bun.lock` and
-`patch-usage.ts` only (`.dockerignore` excludes everything else). Do not add `COPY` lines for
+**Never publish a login.** The image is built from `package.json` and `bun.lock`
+only (`.dockerignore` excludes everything else). Do not add `COPY` lines for
 anything under `~/.pi`.
 
-## Verification receipt
+## Verification receipts
+
+### Pi 1.x image (`4.9.6-1`), 2026-10-16
+
+Linux amd64, Bun 1.4.2, a copy of one existing Claude login in a throwaway volume (the live proxy
+and its volume were not touched):
+
+- `docker build` of this directory completed. The frozen lockfile installed Pi 1.3.0
+  (`pi-ai`, `pi-coding-agent`, `pi-tui`) and the fork's release tarball, whose hash `bun.lock` records.
+- The CI smoke commands, run by hand against the built image: `prompt_tokens_details` is in the
+  shipped file; Pi sends Claude Code 2.1.280, and the version check fails for 2.1.75; exit 64
+  without a token; 401 / 401 / 200 for no, wrong and right bearer; UID 1000.
+- With the compose settings (`--read-only`, `--tmpfs /tmp`, `--cap-drop ALL`,
+  `--security-opt no-new-privileges:true`, `--init`): the proxy started with an empty volume
+  (0 models, no errors) and with the login copy (17 models, no write errors). Pi wrote one new file,
+  `models-store.json` (2 bytes), into the volume; `auth.json` kept the same keys.
+- One request each answered `OK` on `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5-5`,
+  `claude-haiku-5-5` and `claude-opus-4-7`. A streamed and a non-streamed request with a ~13k-token
+  prompt reported `prompt_tokens` 13,367 with the cache written on the first call and read on the
+  next two. A tool call on `claude-opus-5-5` returned `get_weather {"city":"Oslo"}`.
+- The `chat_request` line was logged once per request (9 for these calls), with the canonical model
+  and the stream mode; the prompt text appeared nowhere in the logs.
+- The request Pi builds, captured inside the image with no network and no `models.json`: adaptive
+  thinking and four distinct effort levels on all five models above.
+- `/login` in the image's Pi 1.3.0 UI, opened with the arguments `j5 setup --login` passes:
+  "Select provider to configure" listing Anthropic, then "Select Anthropic login method" with
+  "Browser login (default)" and "Copy code login (headless)". The old path
+  `/app/node_modules/@mariozechner/...` no longer exists in the image; `j5 setup --login` and the
+  command above now use `@earendil-works/pi-coding-agent/dist/bundle/cli.js`.
+
+Not verified: completing a login on Pi 1.x; OAuth token refresh under Pi 1.x; Docker Agent teams
+running against this image; the live proxy swapped to it; long sessions; the arm64 build (CI builds
+it).
+
+### 4.9.5 image, Pi 0.73 (2026-10-15), kept as history
 
 2026-10-15, linux/amd64, Docker Engine 29.8.2, Docker Agent 1.145.0:
 
@@ -362,7 +407,7 @@ No existing workflow was changed. Other models, parallel delegation, permission
 denials, compaction, thinking behavior and long-running token refresh remain
 unverified by this receipt.
 
-### Current Claude models
+### Current Claude models (4.9.5 image, with the since-removed `models.json` mount)
 
 Also on 2026-10-15, using the same image/dependency lock and a read-only
 `models.json` mount:
