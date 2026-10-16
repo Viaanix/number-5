@@ -284,8 +284,15 @@ version 2.1.280 or newer is required (error_code: claude_code_version_too_old)
 volume, so there was still one `auth.json`), failed the same way with
 `version 2.1.251 or newer is required`.
 
-**Consequence:** the proxy's `models.json` does not list Opus 5.5 or Fable 5.1. issue-team's
-builders run on Sonnet 5.5 and its reviewer on Opus 4.7, the newest Opus that works.
+**Consequence on image 4.9.5 and earlier:** the proxy's `models.json` did not list Opus 5.5 or
+Fable 5.1, and issue-team's reviewer ran on Opus 4.7, the newest Opus that worked.
+
+**Resolved on image 4.9.6-1 and later (2026-10-16).** `workflows/flavors.yaml` now maps `opus` to
+`claude-opus-5-5` and adds `fable` as `claude-fable-5-1`, above Opus on the independence ladder.
+A machine still on the old image fails on the first Opus call with the error above, so `j5`
+compares the running proxy container's image with the tag `compose.yaml` pins and warns at launch
+and in `j5 setup` ([issue #31](https://github.com/Viaanix/number-5/issues/31)). The check is a
+warning, not a gate, and "latest" means the pinned tag, not a registry lookup.
 
 **A newer Pi clears it (tried 2026-10-16).** The version in the error is the one Pi's Anthropic
 client sends, `user-agent: claude-cli/<claudeCodeVersion>`, a constant in

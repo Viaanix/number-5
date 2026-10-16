@@ -53,12 +53,12 @@ Verified with `docker agent debug toolsets team.yaml`: that list is what each ag
 
 | Agent | Default model | Default effort | Under `--model <tier>` |
 |---|---|---|---|
-| `auditor`, `reviewer` | `claude-opus-4-7` | high | the tier's model |
+| `auditor`, `reviewer` | `claude-opus-5-5` | high | the tier's model |
 | `writer`, `fixer`, `reader` | `claude-sonnet-5-5` | high | the tier's model |
 
 `--model` puts **all five** agents on one tier, which the defaults deliberately do not (judgment roles above, writing roles below); `--effort` sets every agent's reasoning effort. Both come from the standard flavors generated into `team.yaml` from `workflows/flavors.yaml` (`bun run flavors`). The old `low` flavor, a hand-written step down one tier per role, is gone: to get it, pass `--model sonnet` (the auditor and reviewer then stay at Sonnet, as `low` did, but the writing roles move up to Sonnet instead of down to Haiku).
 
-These roles used Opus 5.5 under the old Claude Code harness. `claude-opus-5-5` is not usable through the proxy: Anthropic answers "Claude Code 2.1.75 does not support this model; version 2.1.280/2.1.251 or newer is required" to Pi's login (observed 2026-10-15, docker-agent v1.145.0), so the two judgment roles run on `claude-opus-4-7`, the newest Opus the proxy serves.
+The two judgment roles run on Opus 5.5, as they did under the old Claude Code harness. It needs proxy image 4.9.6-1 or later: an older image gets Anthropic's "Claude Code 2.1.75 does not support this model" on the first call (observed 2026-10-15, docker-agent v1.145.0). `j5` warns at launch and in `j5 setup` when the running proxy is on another image than `compose.yaml` pins.
 
 ### Helpers
 
@@ -95,7 +95,7 @@ The first two wrap `launcher/src/test-prescreen.ts` and `launcher/src/change-dif
 ## Not verified
 
 - No live model run of any entry point: no agent has talked to the proxy since the conversion from the Claude Code harness. Whether the models follow the instructions (transfer_task to `reader` with the verbatim template, the verdict template, mutation-then-restore) is untested.
-- That every request these agents send is accepted on Opus 4.7, Sonnet 5.5 and Haiku 5.5 at every effort: one tiny request per tier/effort combination was accepted (`low`, `medium`, `high`, `xhigh`; `max` is rejected), not a real agent run.
+- That every request these agents send is accepted on Opus 5.5, Sonnet 5.5 and Haiku 5.5 at every effort: Sonnet and Haiku were tried at all four levels on 2026-10-15, Opus 5.5 only at `high` and `xhigh` (2026-10-16); `max` is rejected on the models it was tried on. These were one-word requests, not a real agent run.
 - That the permission `deny` patterns match as intended inside a live run (only parsed).
 - That a 30,000-character report passes through the environment on Windows.
 - The earlier harness-era check of `review-branch` (2026-10-14) does not carry over.

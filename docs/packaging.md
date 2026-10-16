@@ -50,8 +50,8 @@ Needs [Bun](https://bun.sh) 1.4.2 or newer, Docker with the `docker agent` plugi
 | Command | Does |
 |---|---|
 | `j5 setup` | Checks `bun` (warns below 1.4.2), `git`, `gh` (and that it is logged in), `docker` (and whether this user can reach the daemon), the docker-agent plugin and its version; installs or refreshes the skills. Exit 1 only when a required tool is missing; a warning (old bun, gh not logged in, untested docker-agent version, Docker not reachable) exits 0 unless `--proxy` was asked for, which needs Docker |
-| `j5 setup --check` | The same checks, **changes nothing**; reports skills as `missing` or `stale` |
-| `j5 setup --proxy` | Also: creates `PI_PROXY_AUTH_TOKEN` in `~/.config/cagent/.env` if it has none (owner-only, never printed, never replaced), runs `docker compose up -d --wait` on the package's own `containers/pi-openai-proxy/compose.yaml`, then asks the proxy how many models it serves |
+| `j5 setup --check` | The same checks, **changes nothing**; reports skills as `missing` or `stale`, and (with `--proxy`) whether the running proxy container is on the image tag this package's `compose.yaml` pins |
+| `j5 setup --proxy` | Also: creates `PI_PROXY_AUTH_TOKEN` in `~/.config/cagent/.env` if it has none (owner-only, never printed, never replaced), runs `docker compose up -d --wait` on the package's own `containers/pi-openai-proxy/compose.yaml`, then asks the proxy how many models it serves and confirms the container runs the pinned image |
 | `j5 setup --login` | Implies `--proxy`. When the proxy has no models yet, opens Pi in the proxy container so you can `/login` with **your own** Claude account, then re-checks |
 
 A skill directory that number-5 did not create (no marker file) is never replaced. A token already in your shell environment or in the env file is used as is.

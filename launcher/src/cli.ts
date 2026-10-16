@@ -47,6 +47,7 @@ import {
   showBanner,
   showNote,
 } from "./prompts.ts";
+import { checkProxyImage, describeDifferentProxyImage } from "./proxy-image.ts";
 import {
   DEFAULT_ROUND_LIMIT,
   describeRoundLimit,
@@ -56,7 +57,7 @@ import {
 } from "./queue.ts";
 import { chooseAutomaticFlavors } from "./reviewer-flavor.ts";
 import { runPlan, runQueue } from "./run.ts";
-import { createSetupEnvironment, runSetup } from "./setup.ts";
+import { createSetupEnvironment, runCapturedCommand, runSetup } from "./setup.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
 import { createDockerAgentRunner } from "./team-models.ts";
@@ -609,6 +610,13 @@ async function launch(
   );
   if (automaticFlavors.explanation !== undefined) {
     console.error(`j5: ${automaticFlavors.explanation}`);
+  }
+  // Advisory, and only for a real launch: --print must stay instant and free of side effects.
+  if (!parsedArguments.switches.has("print")) {
+    const proxyImage = checkProxyImage(LAUNCHER_REPOSITORY_ROOT, runCapturedCommand);
+    if (proxyImage.kind === "different") {
+      console.error(`j5: warning: ${describeDifferentProxyImage(proxyImage)}`);
+    }
   }
   const queueChoice = await chooseQueue(
     entryPointName,

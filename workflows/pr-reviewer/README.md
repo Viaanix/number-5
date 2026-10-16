@@ -57,7 +57,7 @@ does not start Docker services or obtain credentials for you.
 | Selection | Model | Adaptive reasoning effort |
 |---|---|---|
 | Default | `claude-sonnet-5-5` | `high` |
-| `--model haiku\|sonnet\|opus` | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-4-7` | unchanged |
+| `--model haiku\|sonnet\|opus\|fable` | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1` | unchanged |
 | `--effort low\|medium\|high\|xhigh` | unchanged | that effort |
 
 The two options are independent. The flavors behind them are generated into `team.yaml` from `workflows/flavors.yaml` (`bun run flavors`).

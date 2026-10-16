@@ -11,15 +11,19 @@
 # (haiku, sonnet, opus, fable), which `bun run flavors` checks. j5 uses the tiers to keep a
 # reviewer off the builders' model class, one step up the ladder haiku < sonnet < opus < fable.
 #
-# Opus 5.5 and Fable 5.1 are not here: the proxy's Claude login is rejected for them
-# (docs/docker-agent/gotchas.md). Add a tier here once a model for it works.
+# Opus 5.5 and Fable 5.1 need the proxy image 4.9.6-1 or later: older images send a Claude Code
+# version Anthropic rejects for them (docs/docker-agent/gotchas.md). j5 warns at launch and in
+# `j5 setup` when the running proxy is on another image than the one pinned in compose.yaml.
 tiers:
   haiku: claude-haiku-5-5
   sonnet: claude-sonnet-5-5
-  opus: claude-opus-4-7
+  opus: claude-opus-5-5
+  fable: claude-fable-5-1
 
 # Reasoning efforts, spelled as the proxy takes them. The proxy accepted low, medium, high and
-# xhigh on all three tiers above and rejected max (2026-10-15, one request per combination).
+# xhigh on haiku, sonnet and Opus 4.7 and rejected max (2026-10-15, one request per combination);
+# the image 4.9.6-1 capture below covers all four levels on Opus 5.5 and Fable 5.1 too. max was
+# not tried on those two, and is not offered.
 #
 # Accepted is not the same as different. What Pi sends upstream (captured 2026-10-16, see
 # docs/docker-agent/gotchas.md) depends on the proxy image:
