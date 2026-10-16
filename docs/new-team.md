@@ -1,6 +1,6 @@
 # Adding a team or an experiment
 
-A team is a directory under `workflows/`. Use [pr-reviewer](../workflows/pr-reviewer/README.md) as the small native-model reference and [issue-team](../workflows/issue-team/README.md) for a multi-agent one (sub-agents, shell, typed tools, permissions). test-quality is the only Claude Code harness team left.
+A team is a directory under `workflows/`. Use [pr-reviewer](../workflows/pr-reviewer/README.md) as the small native-model reference and [issue-team](../workflows/issue-team/README.md) for a multi-agent one (sub-agents, shell, typed tools, permissions). [test-quality](../workflows/test-quality/README.md) is a native team with four single-agent entry points and a read-only sub-agent. No team uses a Claude Code harness any more.
 
 ## Layout
 
