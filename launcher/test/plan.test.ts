@@ -63,7 +63,7 @@ function buildRequest(overrides: Partial<LaunchRequest>): LaunchRequest {
     projectRoot: PROJECT_ROOT,
     repositoryName: "my-app",
     parameterValues: { issue: "12" },
-    effort: undefined,
+    flavorNames: [],
     baseRef: "origin/main",
     worktree: { state: { kind: "absent" }, pullRequestBranch: undefined },
     queueItem: undefined,
@@ -108,6 +108,40 @@ describe("buildLaunchPlan — new worktree", () => {
     });
   });
 
+  // Catches flavors reaching docker-agent in the wrong order: it applies them in the order given,
+  // so the reviewer's tier patch (j5's, last) must land on the models --model and --effort set.
+  test("passes every flavor in the order given", () => {
+    const plan = buildLaunchPlan(
+      buildRequest({
+        flavorNames: ["model-haiku", "effort-medium", "reviewer-on-sonnet"],
+      }),
+    );
+    expect(plan.commandWords.slice(0, 12)).toEqual([
+      "docker",
+      "agent",
+      "run",
+      TEAM_CONFIG_PATH,
+      "--agent",
+      "root",
+      "--flavor",
+      "model-haiku",
+      "--flavor",
+      "effort-medium",
+      "--flavor",
+      "reviewer-on-sonnet",
+    ]);
+  });
+
+  test("adds a single flavor when only one was chosen", () => {
+    const plan = buildLaunchPlan(buildRequest({ flavorNames: ["reviewer-on-opus"] }));
+    expect(plan.commandWords.slice(4, 8)).toEqual([
+      "--agent",
+      "root",
+      "--flavor",
+      "reviewer-on-opus",
+    ]);
+  });
+
   test("fetches only a remote-tracking base; a local ref or SHA is used as it is", () => {
     const plan = buildLaunchPlan(buildRequest({ baseRef: "release-2" }));
     expect(plan.preparationSteps).toEqual([
@@ -143,15 +177,15 @@ describe("buildLaunchPlan — new worktree", () => {
     ).toThrow(`${NEW_WORKTREE_PATH} exists and is not a worktree of ${PROJECT_ROOT}`);
   });
 
-  test("passes the effort as --flavor and passthrough flags before the message", () => {
+  test("passes the flavors as --flavor and passthrough flags before the message", () => {
     const plan = buildLaunchPlan(
-      buildRequest({ effort: "low", passthroughArguments: ["--safety", "balanced"] }),
+      buildRequest({ flavorNames: ["effort-low"], passthroughArguments: ["--safety", "balanced"] }),
     );
     expect(plan.commandWords.slice(4)).toEqual([
       "--agent",
       "root",
       "--flavor",
-      "low",
+      "effort-low",
       "--working-dir",
       NEW_WORKTREE_PATH,
       "--safety",

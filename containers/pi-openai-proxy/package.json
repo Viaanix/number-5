@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.73.0",
-    "@victor-software-house/pi-openai-proxy": "4.9.5"
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@vx-daniel/pi-openai-proxy": "https://github.com/vx-daniel/pi-openai-proxy/releases/download/v4.9.6-j5.3/vx-daniel-pi-openai-proxy-4.9.6.tgz"
   }
 }

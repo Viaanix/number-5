@@ -15,6 +15,11 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import type { EnvironmentVariables } from "./environment.ts";
+import {
+  checkProxyImage,
+  describeDifferentProxyImage,
+  PROXY_DIRECTORY_PARTS,
+} from "./proxy-image.ts";
 import { copySkill, inspectSkill, listSkillPlacements } from "./skills.ts";
 
 /** The docker-agent release the teams were written and tested against (CI installs the same). */
@@ -37,15 +42,14 @@ const PROXY_PORT_VARIABLE = "PI_PROXY_PORT";
 const DEFAULT_PROXY_PORT = "4141";
 const PROXY_TOKEN_BYTES = 32;
 const PROXY_REQUEST_TIMEOUT_MILLISECONDS = 5000;
-const PROXY_DIRECTORY_PARTS = ["containers", "pi-openai-proxy"];
 // docker-agent loads this file on its own, so one token serves Compose and the teams.
 const DOCKER_AGENT_ENV_FILE_PARTS = [".config", "cagent", ".env"];
 const OWNER_ONLY_FILE_MODE = 0o600;
 // Opens Pi's own terminal UI in the proxy image, where `/login` stores the Claude login in the
 // proxy's credential volume. Same command the proxy README gives.
-const PI_LOGIN_ENTRYPOINT = "bun";
+const PI_LOGIN_ENTRYPOINT = "node";
 const PI_LOGIN_ARGUMENTS = [
-  "/app/node_modules/@mariozechner/pi-coding-agent/dist/cli.js",
+  "/app/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
   "--no-session",
   "--no-tools",
   "--no-extensions",
@@ -89,6 +93,27 @@ export type SetupOptions = {
 
 const proxyModelsResponseSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
 
+/**
+ * Runs a command and captures its output. An executable that is not found is exit code 127 rather
+ * than a throw, so callers can treat "no such tool" like any other failed check.
+ */
+export function runCapturedCommand(commandWords: string[]): CommandResult {
+  try {
+    const completedProcess = Bun.spawnSync(commandWords, { stdout: "pipe", stderr: "pipe" });
+    return {
+      exitCode: completedProcess.exitCode,
+      standardOutput: completedProcess.stdout.toString().trim(),
+      standardError: completedProcess.stderr.toString().trim(),
+    };
+  } catch (error) {
+    return {
+      exitCode: COMMAND_NOT_FOUND_EXIT_CODE,
+      standardOutput: "",
+      standardError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 /** The real machine: real commands, the real home directory, a real HTTP request. */
 export function createSetupEnvironment(
   packageRoot: string,
@@ -100,22 +125,7 @@ export function createSetupEnvironment(
     platform: process.platform,
     environmentVariables: process.env,
     bunVersion: Bun.version,
-    runCommand: (commandWords) => {
-      try {
-        const completedProcess = Bun.spawnSync(commandWords, { stdout: "pipe", stderr: "pipe" });
-        return {
-          exitCode: completedProcess.exitCode,
-          standardOutput: completedProcess.stdout.toString().trim(),
-          standardError: completedProcess.stderr.toString().trim(),
-        };
-      } catch (error) {
-        return {
-          exitCode: COMMAND_NOT_FOUND_EXIT_CODE,
-          standardOutput: "",
-          standardError: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
+    runCommand: runCapturedCommand,
     runAttached: (commandWords) => {
       try {
         return Bun.spawnSync(commandWords, {
@@ -396,6 +406,20 @@ async function reportProxyModels(
   return false;
 }
 
+/**
+ * Says whether the running proxy container is on the image this j5 pins. Silent when the check
+ * cannot tell (no container, no Docker), because the model report above already says the proxy is
+ * down and a machine without the proxy has nothing to be told.
+ */
+function reportProxyImage(environment: SetupEnvironment, reporter: Reporter): void {
+  const status = checkProxyImage(environment.packageRoot, environment.runCommand);
+  if (status.kind === "current") {
+    reporter.line("ok", `proxy image ${status.image} is the one this j5 expects`);
+  } else if (status.kind === "different") {
+    reporter.line("warning", describeDifferentProxyImage(status));
+  }
+}
+
 async function setUpProxy(
   environment: SetupEnvironment,
   options: SetupOptions,
@@ -425,6 +449,7 @@ async function setUpProxy(
 
   if (options.checkOnly) {
     await reportProxyModels(environment, token, reporter);
+    reportProxyImage(environment, reporter);
     return;
   }
 
@@ -438,11 +463,12 @@ async function setUpProxy(
     return;
   }
   reporter.line("changed", "proxy is running and healthy");
+  reportProxyImage(environment, reporter);
 
   let hasModels = await reportProxyModels(environment, token, reporter);
   if (!hasModels && options.withLogin) {
     emit(
-      "info     opening Pi: type /login, choose 'Use a subscription', then 'Anthropic (Claude Pro/Max)'. Open the printed link in your browser; exit Pi when it says you are logged in. Use your own account, never a shared one.",
+      "info     opening Pi: type /login, choose Anthropic, then 'Browser login' ('Copy code login' on a machine without a browser). Open the printed link in your browser; exit Pi when it says you are logged in. Use your own account, never a shared one.",
     );
     const loginExitCode = environment.runAttached([
       ...composeWords,

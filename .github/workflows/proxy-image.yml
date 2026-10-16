@@ -12,8 +12,7 @@ on:
       - containers/pi-openai-proxy/Dockerfile
       - containers/pi-openai-proxy/.dockerignore
       - containers/pi-openai-proxy/package.json
-      - containers/pi-openai-proxy/bun.lock
-      - containers/pi-openai-proxy/patch-usage.ts
+      - containers/pi-openai-proxy/package-lock.json
       - containers/pi-openai-proxy/compose.yaml
       - .github/workflows/proxy-image.yml
   push:
@@ -22,8 +21,7 @@ on:
       - containers/pi-openai-proxy/Dockerfile
       - containers/pi-openai-proxy/.dockerignore
       - containers/pi-openai-proxy/package.json
-      - containers/pi-openai-proxy/bun.lock
-      - containers/pi-openai-proxy/patch-usage.ts
+      - containers/pi-openai-proxy/package-lock.json
       - containers/pi-openai-proxy/compose.yaml
       - .github/workflows/proxy-image.yml
 
@@ -52,7 +50,7 @@ jobs:
           esac
           # Only files the Dockerfile copies or builds from; compose.yaml and the README are not part of the image.
           cd containers/pi-openai-proxy
-          inputs=$(cat Dockerfile .dockerignore package.json bun.lock patch-usage.ts | sha256sum | cut -d' ' -f1)
+          inputs=$(cat Dockerfile .dockerignore package.json package-lock.json | sha256sum | cut -d' ' -f1)
           echo "name=$image" >> "$GITHUB_OUTPUT"
           echo "inputs=$inputs" >> "$GITHUB_OUTPUT"
           echo "Image: $image (build inputs $inputs)"
@@ -111,9 +109,16 @@ jobs:
 
       - name: Smoke test the image
         run: |
-          # The usage patch is in the shipped file (the build also fails if the pinned package changes).
-          patched=$(docker run --rm --entrypoint grep proxy-smoke:local -c cache_write_tokens /app/node_modules/@victor-software-house/pi-openai-proxy/dist/index.mjs)
-          test "$patched" -ge 1 || { echo "::error::the usage patch is not in the image"; exit 1; }
+          # The shipped proxy reports cached tokens in prompt_tokens (it was a build-time patch
+          # before the fork; now it is in the fork's source, so check that the right build is here).
+          details=$(docker run --rm --entrypoint grep proxy-smoke:local -c prompt_tokens_details /app/node_modules/@vx-daniel/pi-openai-proxy/dist/index.mjs)
+          test "$details" -ge 1 || { echo "::error::the shipped proxy does not report prompt_tokens_details"; exit 1; }
+          # Pi's Anthropic client must identify as Claude Code 2.1.280 or newer: Anthropic refuses
+          # Opus 5.5 and Fable 5.1 to older versions (Pi 0.x sent 2.1.75).
+          client=$(docker run --rm --entrypoint sh proxy-smoke:local -c "grep -rhoE 'claudeCodeVersion = \"[0-9.]+\"' /app/node_modules/@earendil-works/pi-ai/dist | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'")
+          test -n "$client" || { echo "::error::could not read the Claude Code version Pi sends"; exit 1; }
+          printf '%s\n%s\n' 2.1.280 "$client" | sort -V -C || { echo "::error::Pi sends Claude Code $client; 2.1.280 or newer is required"; exit 1; }
+          echo "Pi sends Claude Code $client"
           # The image serves a Claude login, so it must refuse to start without a bearer token.
           # Bounded: an image that did start would run forever, and that has to fail, not hang.
           docker run -d --name no-token proxy-smoke:local > /dev/null
@@ -131,6 +136,9 @@ jobs:
           test "$(code)" = 401 || { echo "::error::no bearer token was not refused"; docker logs smoke; exit 1; }
           test "$(code -H 'Authorization: Bearer wrong')" = 401 || { echo "::error::a wrong bearer token was not refused"; exit 1; }
           test "$(code -H 'Authorization: Bearer smoke-token')" = 200 || { echo "::error::the right bearer token was refused"; docker logs smoke; exit 1; }
+          # /healthz is the unauthenticated liveness check Compose's healthcheck uses; it must stay
+          # open without a token while every other route is closed.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4141/healthz)" = 200 || { echo "::error::/healthz is not open without a token"; docker logs smoke; exit 1; }
           test "$(docker exec smoke id -u)" = 1000 || { echo "::error::the image does not run as UID 1000"; exit 1; }
           docker rm -f smoke > /dev/null
 

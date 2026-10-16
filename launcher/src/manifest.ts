@@ -77,12 +77,28 @@ const entryPointSchema = z.strictObject({
   queue: queueSchema.optional(),
 });
 
+// Which agent reviews the work of which others. j5 then keeps the reviewer's model tier different
+// from theirs (launcher/src/independence.ts), choosing it from the team's `reviewer-on-<tier>`
+// flavors. The agents are named in team.yaml.
+const independenceSchema = z.strictObject({
+  reviewer: z.string().min(1),
+  reviews: z.array(z.string().min(1)).min(1),
+});
+
+// Which of the team's named models --model and --effort change. The standard flavors that do it
+// are generated into team.yaml from workflows/flavors.yaml (launcher/src/flavor-catalog.ts).
+const flavorsSchema = z.strictObject({
+  models: z.array(z.string().min(1)).min(1),
+});
+
 const manifestSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
   team: z.string().min(1),
   path: z.array(z.string().min(1)).default([]),
   entrypoints: z.record(z.string(), entryPointSchema),
+  independence: independenceSchema.optional(),
+  flavors: flavorsSchema.optional(),
 });
 
 /** One user-supplied value an entry point needs, such as an issue number. */
@@ -93,6 +109,12 @@ export type WorktreeDefinition = z.infer<typeof worktreeSchema>;
 
 /** How an entry point runs over a queue of values. */
 export type QueueDefinition = z.infer<typeof queueSchema>;
+
+/** Which agent must not share a model class with the agents whose work it reviews. */
+export type IndependenceRule = z.infer<typeof independenceSchema>;
+
+/** The named models --model and --effort change, from the manifest's `flavors:` block. */
+export type FlavorsDefinition = z.infer<typeof flavorsSchema>;
 
 /** One way of starting a team: an agent, its parameters, worktree mode and first message. */
 export type EntryPointDefinition = z.infer<typeof entryPointSchema>;
@@ -113,6 +135,21 @@ export type WorkflowManifest = z.infer<typeof manifestSchema> & {
  */
 export function findManifestProblems(manifest: z.infer<typeof manifestSchema>): string[] {
   const problems: string[] = [];
+  if (manifest.independence !== undefined) {
+    const { reviewer, reviews } = manifest.independence;
+    if (reviews.includes(reviewer)) {
+      problems.push(`independence: '${reviewer}' cannot review its own work`);
+    }
+    if (new Set(reviews).size !== reviews.length) {
+      problems.push("independence.reviews: an agent is listed twice");
+    }
+  }
+  if (
+    manifest.flavors !== undefined &&
+    new Set(manifest.flavors.models).size !== manifest.flavors.models.length
+  ) {
+    problems.push("flavors.models: a model is listed twice");
+  }
   for (const [entryPointName, entryPoint] of Object.entries(manifest.entrypoints)) {
     const where = `entrypoints.${entryPointName}`;
     const declaredParameterNames = Object.keys(entryPoint.parameters);

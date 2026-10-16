@@ -304,25 +304,56 @@ describe("discoverTeams", () => {
 });
 
 describe("readTeamConfigSummary", () => {
-  test("reads agent names and flavor names in declaration order", () => {
+  test("reads agent names and the offered tiers and levels in declaration order", () => {
     const manifestPath = writeTeamFixture(
       createTemporaryDirectory(),
       VALID_MANIFEST_YAML,
-      buildTeamYaml(["max", "low"]),
+      buildTeamYaml(["model-opus", "model-haiku", "effort-high", "effort-low"]),
     );
     expect(readTeamConfigSummary(join(manifestPath, "..", "team.yaml"))).toEqual({
       agentNames: ["root"],
-      flavorNames: ["max", "low"],
+      modelTiers: ["opus", "haiku"],
+      effortLevels: ["high", "low"],
+      reviewerFlavorNames: [],
+      otherFlavorNames: [],
     });
   });
 
-  test("reports no flavors for a team without a flavors section", () => {
+  // Catches the reviewer's flavors showing up as user choices: `--model` would then accept
+  // `reviewer-on-opus`'s tier by another name, and the prompt and `j5 list` would offer a choice
+  // the user must never make.
+  test("keeps the reviewer-on-<tier> flavors out of the models and efforts", () => {
+    const manifestPath = writeTeamFixture(
+      createTemporaryDirectory(),
+      VALID_MANIFEST_YAML,
+      buildTeamYaml(["effort-low", "reviewer-on-opus", "reviewer-on-sonnet"]),
+    );
+    const summary = readTeamConfigSummary(join(manifestPath, "..", "team.yaml"));
+    expect(summary.effortLevels).toEqual(["low"]);
+    expect(summary.modelTiers).toEqual([]);
+    expect(summary.reviewerFlavorNames).toEqual(["reviewer-on-opus", "reviewer-on-sonnet"]);
+  });
+
+  // Catches a hand-written flavor that no option can reach going unnoticed.
+  test("lists a flavor with a non-standard name apart", () => {
+    const manifestPath = writeTeamFixture(
+      createTemporaryDirectory(),
+      VALID_MANIFEST_YAML,
+      buildTeamYaml(["low", "effort-low"]),
+    );
+    const summary = readTeamConfigSummary(join(manifestPath, "..", "team.yaml"));
+    expect(summary.otherFlavorNames).toEqual(["low"]);
+    expect(summary.effortLevels).toEqual(["low"]);
+  });
+
+  test("reports no offered values for a team without a flavors section", () => {
     const manifestPath = writeTeamFixture(
       createTemporaryDirectory(),
       VALID_MANIFEST_YAML,
       buildTeamYaml([]),
     );
-    expect(readTeamConfigSummary(join(manifestPath, "..", "team.yaml")).flavorNames).toEqual([]);
+    const summary = readTeamConfigSummary(join(manifestPath, "..", "team.yaml"));
+    expect([summary.modelTiers, summary.effortLevels]).toEqual([[], []]);
   });
 
   test("rejects a file with no agents map", () => {

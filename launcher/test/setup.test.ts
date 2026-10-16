@@ -431,6 +431,75 @@ describe("starting the proxy", () => {
   });
 });
 
+describe("the proxy image", () => {
+  const PINNED_IMAGE = "ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-1";
+  const LIST_PROXY_CONTAINERS =
+    "docker ps --quiet --filter label=com.docker.compose.project=j5-pi-openai-proxy --filter label=com.docker.compose.service=proxy";
+  const INSPECT_PROXY_CONTAINER = "docker inspect --format {{.Config.Image}} abc123def456";
+
+  function createHarnessWithCompose(runningImages: string | undefined) {
+    const harness = createHarness({
+      environmentVariables: { PI_PROXY_AUTH_TOKEN: "from-the-shell" },
+      commands:
+        runningImages === undefined
+          ? {}
+          : {
+              [LIST_PROXY_CONTAINERS]: succeeded("abc123def456"),
+              [INSPECT_PROXY_CONTAINER]: succeeded(runningImages),
+            },
+    });
+    mkdirSync(join(harness.packageRoot, "containers", "pi-openai-proxy"), { recursive: true });
+    writeFileSync(
+      harness.composeFilePath,
+      `name: j5-pi-openai-proxy\nservices:\n  proxy:\n    image: ${PINNED_IMAGE}\n`,
+    );
+    return harness;
+  }
+
+  // Catches the bug this exists for: a machine still on the old image sees no hint that Opus 5.5
+  // will be rejected, and finds out from Anthropic's version error in the middle of a run.
+  test("--check warns when the running proxy is on another image, naming both, and still exits 0", async () => {
+    const harness = createHarnessWithCompose("j5-pi-openai-proxy:4.9.5");
+
+    expect(await harness.run({ checkOnly: true, withProxy: true })).toBe(0);
+
+    const warnings = harness.linesStartingWith("warning").join("\n");
+    expect(warnings).toContain("j5-pi-openai-proxy:4.9.5");
+    expect(warnings).toContain(PINNED_IMAGE);
+    expect(warnings).toContain("j5 setup --proxy");
+  });
+
+  test("--check says nothing is wrong when the running image is the pinned one", async () => {
+    const harness = createHarnessWithCompose(PINNED_IMAGE);
+
+    await harness.run({ checkOnly: true, withProxy: true });
+
+    expect(harness.linesStartingWith("ok").join("\n")).toContain(`proxy image ${PINNED_IMAGE}`);
+    expect(harness.linesStartingWith("warning").join("\n")).not.toContain("this j5 expects");
+  });
+
+  // Catches a machine without the proxy (no container, or Docker answering nothing) being
+  // nagged about an image it does not run.
+  test("reports nothing about the image when no proxy container is running", async () => {
+    const harness = createHarnessWithCompose(undefined);
+
+    await harness.run({ checkOnly: true, withProxy: true });
+
+    expect(harness.lines.join("\n")).not.toContain("proxy image");
+    expect(harness.lines.join("\n")).not.toContain("this j5 expects");
+  });
+
+  // Catches the check running only in --check: after Compose recreates the proxy, setup must
+  // confirm the new container really is on the pinned image.
+  test("a real start checks the image after Compose brought the proxy up", async () => {
+    const harness = createHarnessWithCompose(PINNED_IMAGE);
+
+    await harness.run({ withProxy: true });
+
+    expect(harness.linesStartingWith("ok").join("\n")).toContain(`proxy image ${PINNED_IMAGE}`);
+  });
+});
+
 describe("logging the proxy in", () => {
   test("opens Pi through Compose after the proxy is up, then re-checks the models", async () => {
     const harness = createHarness({
@@ -454,9 +523,9 @@ describe("logging the proxy in", () => {
       "--rm",
       "--no-deps",
       "--entrypoint",
-      "bun",
+      "node",
       "proxy",
-      "/app/node_modules/@mariozechner/pi-coding-agent/dist/cli.js",
+      "/app/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
       "--no-session",
       "--no-tools",
       "--no-extensions",

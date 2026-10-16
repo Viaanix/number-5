@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { describeInvalidEffort, describeInvalidParameterValue } from "../src/parameters.ts";
+import { describeInvalidChoice, describeInvalidParameterValue } from "../src/parameters.ts";
 
 const ISSUE_PARAMETER = { type: "integer", label: "Issue number" } as const;
 const TITLE_PARAMETER = { type: "string", label: "Title" } as const;
@@ -34,24 +34,35 @@ describe("describeInvalidParameterValue", () => {
   });
 });
 
-describe("describeInvalidEffort", () => {
-  test("accepts no effort, meaning the team's defaults, even when the team has no flavors", () => {
-    expect(describeInvalidEffort(undefined, [])).toBeUndefined();
+describe("describeInvalidChoice", () => {
+  test("accepts no choice, meaning team.yaml as written, even when the team offers none", () => {
+    expect(describeInvalidChoice("effort", undefined, [])).toBeUndefined();
+    expect(describeInvalidChoice("model", undefined, [])).toBeUndefined();
   });
 
-  test("accepts a declared flavor", () => {
-    expect(describeInvalidEffort("low", ["low", "max"])).toBeUndefined();
+  test("accepts an offered value", () => {
+    expect(describeInvalidChoice("effort", "low", ["low", "max"])).toBeUndefined();
+    expect(describeInvalidChoice("model", "haiku", ["haiku", "opus"])).toBeUndefined();
   });
 
-  test("rejects a misspelled flavor and lists the valid ones", () => {
-    expect(describeInvalidEffort("lwo", ["low", "max"])).toBe(
-      "--effort 'lwo' is not a flavor of this team; choose one of: low, max",
+  // Catches a typo running at the team's default: docker-agent would ignore the unknown flavor.
+  test("rejects a misspelled value and lists the valid ones, in the option's own words", () => {
+    expect(describeInvalidChoice("effort", "lwo", ["low", "max"])).toBe(
+      "--effort 'lwo' is not an effort of this team; choose one of: low, max",
+    );
+    expect(describeInvalidChoice("model", "hiaku", ["haiku", "opus"])).toBe(
+      "--model 'hiaku' is not a model tier of this team; choose one of: haiku, opus",
     );
   });
 
-  test("rejects any effort for a team without flavors", () => {
-    expect(describeInvalidEffort("low", [])).toBe(
-      "--effort 'low': this team defines no flavors in its team.yaml",
+  // The two options are independent: an effort the team offers is no model tier.
+  test("does not take a value offered for the other option", () => {
+    expect(describeInvalidChoice("model", "low", ["haiku", "opus"])).toContain("not a model tier");
+  });
+
+  test("rejects any value for a team that offers none, and says how to get some", () => {
+    expect(describeInvalidChoice("effort", "low", [])).toBe(
+      "--effort 'low': this team offers no effort choices (its team.yaml has no effort-* flavors; run bun run flavors)",
     );
   });
 });

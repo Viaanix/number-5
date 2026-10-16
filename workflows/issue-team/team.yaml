@@ -22,9 +22,11 @@ providers:
 # accepts an explicit reasoning_effort for Claude's adaptive thinking instead. Every model
 # here needs one: without it the pinned adapter sends `thinking: disabled`, which
 # Sonnet 5.5 rejects.
-# The reviewer used to run on Opus. claude-opus-5-5 is not usable here: Anthropic answers
-# "Claude Code 2.1.75 does not support this model; version 2.1.280 or newer is required"
-# to the proxy's login, so every role uses Sonnet 5.5 (2026-10-15, docker-agent v1.145.0).
+# The builders (coordinator, builder, tester) run on Sonnet 5.5. The reviewer runs on a different
+# model tier, chosen by j5 from theirs (`independence` in workflow.yaml, the reviewer-on-<tier>
+# flavors below): Opus 5.5 here (a Fable reviewer when `--model opus` puts the builders on Opus).
+# Opus 5.5 and Fable 5.1 need proxy image 4.9.6-1 or later; j5 warns when the running proxy is on
+# another image than compose.yaml pins.
 models:
   coordinator_model:
     provider: pi
@@ -49,7 +51,7 @@ models:
         reasoning_effort: high
   reviewer_model:
     provider: pi
-    model: claude-sonnet-5-5
+    model: claude-opus-5-5
     max_tokens: 16384
     provider_opts:
       extra_body:
@@ -59,7 +61,9 @@ agents:
   root:
     model: coordinator_model
     description: Owns one GitHub issue from a fresh worktree to a pull request, a draft when the review or verification does not pass
-    instruction_file: instructions/work-issue.md
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/work-issue.md
     add_prompt_files: [AGENTS.md, CLAUDE.md]
     add_environment_info: true
     max_iterations: 150
@@ -73,7 +77,9 @@ agents:
   builder:
     model: builder_model
     description: Implements code changes from a self-contained task; does not commit or push
-    instruction_file: instructions/builder.md
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/builder.md
     add_prompt_files: [AGENTS.md, CLAUDE.md]
     add_environment_info: true
     max_iterations: 150
@@ -90,6 +96,7 @@ agents:
     # directory, so these are copies of skills/j5-test-quality; test/skill-instructions.test.ts
     # fails when one drifts. Only the framework reference stays a read: it depends on the project.
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/tester.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/generate.md
@@ -117,6 +124,7 @@ agents:
     # Same for the review workflow and its checklists: loaded for the reviewer, not left for it
     # to remember to read.
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/reviewer.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/review-single.md
@@ -183,30 +191,138 @@ permissions:
     - "shell:cmd=*gh repo delete*"
     - "shell:cmd=*gh release*"
 
-# Effort levels, chosen with `j5 issue-team ... --effort <name>` (docker agent run
-# --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
-# the file as written (every agent on Sonnet 5.5 at effort high).
-# docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
+# Launch options, chosen with `j5 issue-team ... --model <tier> --effort <level>`: standard
+# flavors (docker agent run --flavor ...), a YAML patch deep-merged over this file, defined once
+# in workflows/flavors.yaml and written into the block below by `bun run flavors`.
+# `flavors.models` in workflow.yaml lists the models --model changes (coordinator, builder,
+# tester). --effort also sets the reviewer's effort. No flavor = the file as written (the
+# builders on Sonnet 5.5, the reviewer on Opus 4.7, all at effort high).
+#
+# The reviewer-on-<tier> flavors are j5's, never a user choice: after --model and --effort it adds
+# one so the reviewer is one model tier above the builders (or one below when the builders are
+# already on the top tier). docker-agent ignores an unknown --flavor silently; j5 rejects names
+# the team does not define.
+# BEGIN GENERATED FLAVORS: written by `bun run flavors` from workflows/flavors.yaml and the
+# `flavors:` block of workflow.yaml. Edit those, not this block.
 flavors:
-  low:
+  model-haiku:
     models:
       coordinator_model:
         model: claude-haiku-5-5
+      builder_model:
+        model: claude-haiku-5-5
+      tester_model:
+        model: claude-haiku-5-5
+  model-sonnet:
+    models:
+      coordinator_model:
+        model: claude-sonnet-5-5
+      builder_model:
+        model: claude-sonnet-5-5
+      tester_model:
+        model: claude-sonnet-5-5
+  model-opus:
+    models:
+      coordinator_model:
+        model: claude-opus-5-5
+      builder_model:
+        model: claude-opus-5-5
+      tester_model:
+        model: claude-opus-5-5
+  model-fable:
+    models:
+      coordinator_model:
+        model: claude-fable-5-1
+      builder_model:
+        model: claude-fable-5-1
+      tester_model:
+        model: claude-fable-5-1
+  effort-low:
+    models:
+      coordinator_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      builder_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      tester_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+  effort-medium:
+    models:
+      coordinator_model:
         provider_opts:
           extra_body:
             reasoning_effort: medium
       builder_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
       tester_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
       reviewer_model:
-        model: claude-haiku-5-5
         provider_opts:
           extra_body:
             reasoning_effort: medium
+  effort-high:
+    models:
+      coordinator_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      builder_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      tester_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+  effort-xhigh:
+    models:
+      coordinator_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      builder_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      tester_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+  reviewer-on-haiku:
+    models:
+      reviewer_model:
+        model: claude-haiku-5-5
+  reviewer-on-sonnet:
+    models:
+      reviewer_model:
+        model: claude-sonnet-5-5
+  reviewer-on-opus:
+    models:
+      reviewer_model:
+        model: claude-opus-5-5
+  reviewer-on-fable:
+    models:
+      reviewer_model:
+        model: claude-fable-5-1
+# END GENERATED FLAVORS

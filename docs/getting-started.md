@@ -333,16 +333,18 @@ What happens:
 2. It starts the proxy in Docker. The **first time takes a few minutes**. You may see `unauthorized` from `ghcr.io`; that is fine, it then builds the same image on your computer.
 3. When the proxy has no Claude login yet, **Pi** opens in your terminal. Do exactly this:
    - Type `/login` and press Enter.
-   - Choose **Use a subscription**, then **Anthropic (Claude Pro/Max)**.
+   - Pi lists providers under "Select provider to configure". Choose **Anthropic**, then **Browser login** (choose **Copy code login (headless)** instead if this computer has no browser).
    - Open the link it prints in your browser, sign in with **your own** Claude account, and approve.
    - Come back to the terminal. When it says you are logged in, press `Ctrl+D` to leave Pi. (Pi's own footer lists `ctrl+c/ctrl+d clear/exit`; if `Ctrl+D` does nothing, press `Ctrl+C` once to clear the input line and then `Ctrl+D`.)
-4. `j5` then counts the models. You want a line like `ok  proxy on port 4141 serves 25 models`.
+4. `j5` then counts the models. You want a line like `ok  proxy on port 4141 serves 17 models` (the number depends on your account and Pi's catalogue).
 
 You only do this once per computer. To check later:
 
 ```bash
 j5 setup --check --proxy
 ```
+
+Both `j5 setup --check --proxy` and a launch compare the running proxy's image with the one this version of j5 pins, and warn when they differ. If you see that warning after updating j5, run `j5 setup --proxy` to recreate the proxy on the new image; your login is kept.
 
 ## Step 7: Your first run
 

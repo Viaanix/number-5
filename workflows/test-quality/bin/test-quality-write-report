@@ -1,0 +1,4 @@
+#!/bin/sh
+# test-quality-write-report for Linux and macOS: runs helpers/write-report.ts with Bun. The Windows
+# launcher is test-quality-write-report.cmd; docker-agent's script tools call either by bare name.
+exec bun "$(dirname "$0")/../helpers/write-report.ts" "$@"

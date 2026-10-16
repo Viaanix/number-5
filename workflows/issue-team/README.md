@@ -16,12 +16,13 @@ flowchart LR
 | Layer | What | Where |
 |---|---|---|
 | Runtime | docker-agent v1.145.0 (`docker agent`) | Docker CLI plugin |
-| Agents | Four native agents: `root` (the entry point) and the `builder`, `tester` and `reviewer` it delegates to with `transfer_task`. All on Sonnet 5.5 at effort high through the proxy | `team.yaml` |
+| Agents | Four native agents: `root` (the entry point) and the `builder`, `tester` and `reviewer` it delegates to with `transfer_task`. The builders run on Sonnet 5.5 at effort high through the proxy; the reviewer runs on a different model tier (see *Independent review*) | `team.yaml` |
 | Prompts | One `instruction_file` per agent; `workflow.yaml` sends only the task ("Work issue #12") | `instructions/*.md`, `workflow.yaml` |
 | Helpers | Deterministic Bun scripts, launched from `PATH` by an `sh` launcher (Linux, macOS) or a `.cmd` (Windows); `test_prescreen` and `change_diff` are typed tools that call them | `helpers/*.ts`, `bin/`, `team.yaml` |
-| Effort levels | `low` flavor: every agent on Haiku 5.5 at effort medium | `team.yaml` → `flavors` |
+| Model and effort | `--model haiku\|sonnet\|opus\|fable` puts the builders (coordinator, builder, tester) on that tier; `--effort low\|medium\|high\|xhigh` sets reasoning effort on them and the reviewer. Independent options; defaults are Sonnet 5.5 builders, Opus 5.5 reviewer, all at high | Standard flavors generated into `team.yaml` from `workflows/flavors.yaml`; `flavors.models` in `workflow.yaml` |
 | Test discipline | `j5-test-quality` skill, read by path with `read_file`, and the `test_prescreen` tool | `skills/j5-test-quality` in this repository, installed to `~/.agents/skills/j5-test-quality` |
 | GitHub | `gh` CLI (issues, PRs) | `PATH` |
+| Independent review | The reviewer is never the builders' model class. `j5` puts it one tier above the builders (Opus 5.5 for the default Sonnet builders, Fable 5.1 for `--model opus`, Sonnet 5.5 for `--model haiku`; for `--model fable`, with nothing above, Opus 5.5), and refuses to launch if it cannot | `independence` in `workflow.yaml`, `reviewer-on-<tier>` flavors in `team.yaml` |
 
 ### Where prompts live
 
@@ -76,7 +77,7 @@ Each run works in its own git worktree beside your checkout (e.g. `~/code/my-app
 ## Commands
 
 ```bash
-j5 issue-team work-issue --issue 123 [--project <path>] [--base <ref>] [--effort low]
+j5 issue-team work-issue --issue 123 [--project <path>] [--base <ref>] [--model haiku] [--effort medium]
 j5 issue-team work-issue --issue 123 --print     # the full docker agent command, task included
 ```
 
@@ -115,7 +116,8 @@ Worktrees are never removed automatically: use `git worktree list` and `git work
 
 - **Not yet run for real.** Validated and dry-run only; no stage has run against a GitHub repository since the move to native agents.
 - **No follow-up or closeout stage.** Addressing review comments on the PR, and closing issues after merge, are done by hand. The `pr-followup` and `closeout` entry points were removed.
-- **Opus is unavailable.** The reviewer used to run on Opus. Anthropic rejects `claude-opus-5-5` for the proxy's login ("Claude Code 2.1.75 does not support this model; version 2.1.280 or newer is required"), so every role uses Sonnet 5.5.
-- **Long runs through the proxy are unproven.** Context compaction and token refresh over a multi-hour issue have not been exercised. The proxy reported only uncached input as `prompt_tokens`, so Docker Agent's counters, and with them its compaction trigger, saw about 0.04% of the real context; a build-time patch fixes the report and is verified against the proxy, but a real run's counters have not been watched yet ([gotcha](../../docs/docker-agent/gotchas.md#token-counters-through-the-proxy-ignore-cached-input-so-compaction-cannot-trigger)). A shell call is killed after 30 seconds unless the agent passes a `timeout`; the instructions say to.
+- **Opus 5.5 and Fable 5.1 need proxy image 4.9.6-1 or later.** An older image sends a Claude Code version Anthropic rejects for them ("Claude Code 2.1.75 does not support this model"), and the run fails on its first Opus call. `j5` warns at launch and in `j5 setup` when the running proxy is on another image than `compose.yaml` pins; it only warns. See the [gotcha](../../docs/docker-agent/gotchas.md#opus-55-is-rejected-for-the-pi-proxys-subscription-login).
+- **The independence rule has not been exercised in a real run.** The tier choice, the flavors and the refusals are covered by tests and `validate:teams`, and `j5 … --print` shows the chosen flavor; no model call has used a reviewer on Opus 5.5 or Fable 5.1 through this team yet (single requests to both through the proxy work).
+- **Long runs through the proxy are unproven.** Context compaction and token refresh over a multi-hour issue have not been exercised. The proxy used to report only uncached input as `prompt_tokens`, so Docker Agent's counters, and with them its compaction trigger, saw about 0.04% of the real context; image 4.9.6-1 fixes the report in the fork's source and it is verified against the proxy, but a real run's counters have not been watched yet ([gotcha](../../docs/docker-agent/gotchas.md#token-counters-through-the-proxy-ignore-cached-input-so-compaction-cannot-trigger)). A shell call is killed after 30 seconds unless the agent passes a `timeout`; the instructions say to.
 - **Skill files**: the tester's and reviewer's prompts include the skill's router, their workflow, and the four checklists and references that workflow names (`instructions/skill/`, copies kept identical to `skills/j5-test-quality` by a test), so the method is always in context. Only the framework reference (Vitest or bun:test) is still read by path with `read_file` from `~/.agents/skills/j5-test-quality/`, because it depends on the project; the reviewer must name the one it read in its report. docker-agent registers `read_skill_file` only for skills that list supporting files, which local skills never do in v1.145.0 ([gotcha](../../docs/docker-agent/gotchas.md#local-skills-get-read_skill-but-no-read_skill_file)).
 - **Docs vs. version**: docker.github.io tracks `main` and documents flags v1.145.0 lacks (`--last`). Check `docker agent run --help`.

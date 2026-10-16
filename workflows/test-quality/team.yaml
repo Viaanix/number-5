@@ -1,71 +1,405 @@
 # Test-quality team: runs the j5-test-quality skill against a project checkout.
 # Entry points are in workflow.yaml; each starts one agent, one skill workflow:
-#   auditor   audit           review-at-scale.md   read-only; report to .j5/review/
+#   auditor   audit           review-at-scale.md   read-only; report to .j5/review/ (write_report)
 #   reviewer  review-branch   review-single.md     read-only; report in the session
 #   writer    write-tests     generate.md          adds tests in the checkout; no production code
 #   fixer     fix-failing     maintain-failing.md  fixes the code (or, with justification, the test)
 #
-# Every agent is Claude Code (`harness: claude-code`) on the user's Claude subscription;
-# no API key is needed. A harness agent receives only the task message: docker-agent
-# drops instruction files, toolsets, skills, sub_agents and permission rules for it
-# (docs/docker-agent/gotchas.md). So each agent's whole prompt is its entry point's
-# `message` in workflow.yaml, the helpers in bin/ are called through Claude Code's
-# shell by bare name, and the read-only and no-commit rules are instructions only.
-# Per-repository context comes from that repository's CLAUDE.md, which Claude Code reads.
-# `harness.model` picks the agent's Claude model (verified: a run with claude-haiku-4-5
-# shows that model in Claude Code's transcript). Without it, Claude Code uses the user's
-# own default model, which is not this repository's to decide.
+# Native docker-agent agents on the local Pi proxy (containers/pi-openai-proxy), built the
+# way workflows/issue-team is. The proxy must be running, with PI_PROXY_AUTH_TOKEN available
+# (export it, or save it in ~/.config/cagent/.env). No agent here uses a provider harness.
+#   - each agent's procedure is a list of instruction_files in instructions/; workflow.yaml
+#     sends only the task ("Write tests for {target}.");
+#   - the auditor hands regions to the read-only `reader` sub-agent with transfer_task;
+#   - the auditor and reviewer have no shell and no write tools, so their read-only role is
+#     enforced by tool selection (the auditor's one exception is write_report, which can only
+#     create a new file under .j5/review/);
+#   - the repository's own AGENTS.md / CLAUDE.md are loaded for the four entry agents;
+#   - the typed script tools below wrap the helpers in bin/, which workflow.yaml puts on PATH.
+providers:
+  pi:
+    base_url: http://127.0.0.1:4141/v1
+    api_type: openai_chatcompletions
+    token_key: PI_PROXY_AUTH_TOKEN
+
+# Docker Agent maps thinking_budget only for recognized OpenAI reasoning models; the proxy
+# accepts an explicit reasoning_effort for Claude's adaptive thinking instead. Every model
+# here needs one: without it the pinned adapter sends `thinking: disabled`, which
+# Sonnet 5.5 rejects.
+# The auditor and reviewer run on Opus 5.5 (the tier `--model opus` means). It needs proxy image
+# 4.9.6-1 or later: an older image sends a Claude Code version Anthropic rejects for it, and j5
+# warns when the running proxy is on another image than compose.yaml pins.
+models:
+  auditor_model:
+    provider: pi
+    model: claude-opus-5-5
+    max_tokens: 32768
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+  reviewer_model:
+    provider: pi
+    model: claude-opus-5-5
+    max_tokens: 16384
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+  writer_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 32768
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+  fixer_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 32768
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
+  reader_model:
+    provider: pi
+    model: claude-sonnet-5-5
+    max_tokens: 16384
+    provider_opts:
+      extra_body:
+        reasoning_effort: high
 
 agents:
   auditor:
-    description: Read-only audit of a test suite at scale. Writes one report under .j5/review/ and edits nothing else.
-    harness:
-      type: claude-code
-      model: claude-opus-5-5
-      effort: high
+    model: auditor_model
+    description: Read-only audit of a test suite at scale. Writes one report under .j5/review/ and nothing else.
+    # instruction_file only accepts paths inside this directory, so the skill files the agent
+    # follows are copies of skills/j5-test-quality; test/skill-instructions.test.ts fails when
+    # one drifts. Only the framework references stay a read (they depend on the project).
+    # review-single.md is deliberately not here: the auditor reads it only for a small target.
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/auditor.md
+      - instructions/skill/j5-test-quality.md
+      - instructions/skill/review-at-scale.md
+      - instructions/skill/mock-antipatterns.md
+      - instructions/skill/fig-leaf-signals.md
+      - instructions/skill/pre-claim.md
+      - instructions/skill/assertion-shape.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 150
+    sub_agents: [reader]
+    toolsets:
+      - type: filesystem
+        allow_list: [".", "~/.agents/skills/j5-test-quality"]
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
+      - type: git
+      - type: script
+        shell:
+          test_prescreen:
+            cmd: test-quality-prescreen
+            description: Runs the j5-test-quality pre-screen on every test file under `target` (a file or directory relative to the project root); without `target`, on the test files changed on this branch. Reports HIGH findings as a failed call, and a failed run as an error.
+            args:
+              target:
+                type: string
+                description: File or directory to scan, relative to the project root
+          write_report:
+            cmd: test-quality-write-report
+            description: "Writes the audit report to .j5/review/test-quality-audit-<today>.md in the project, adding -2, -3, ... when that file exists; it never overwrites. Returns the path written. The report must be non-empty and at most 30000 characters."
+            args:
+              content:
+                type: string
+                description: The whole report, in markdown
+            required: [content]
 
   reviewer:
-    description: Independent read-only review of the tests added or changed on the current branch.
-    harness:
-      type: claude-code
-      model: claude-opus-5-5
-      effort: high
+    model: reviewer_model
+    description: Independent, read-only review of the tests added or changed on the current branch; has no shell and no write tools
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/reviewer.md
+      - instructions/skill/j5-test-quality.md
+      - instructions/skill/review-single.md
+      - instructions/skill/mock-antipatterns.md
+      - instructions/skill/fig-leaf-signals.md
+      - instructions/skill/pre-claim.md
+      - instructions/skill/assertion-shape.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 100
+    toolsets:
+      - type: filesystem
+        allow_list: [".", "~/.agents/skills/j5-test-quality"]
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
+      - type: git
+      - type: script
+        shell:
+          test_prescreen:
+            cmd: test-quality-prescreen
+            description: Runs the j5-test-quality pre-screen on the test files changed on this branch, including uncommitted changes and new files registered with `git add -N`. Reports HIGH findings as a failed call, and a failed run as an error.
+          change_diff:
+            cmd: test-quality-change-diff
+            description: Prints the change under review (the branch's commits and diff since it left the remote default branch, then uncommitted and untracked work).
 
   writer:
+    model: writer_model
     description: Writes tests that fail against broken implementations, in the current checkout. Does not edit production code, commit, or push.
-    harness:
-      type: claude-code
-      model: claude-sonnet-5-5
-      effort: high
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/writer.md
+      - instructions/skill/j5-test-quality.md
+      - instructions/skill/generate.md
+      - instructions/skill/mock-antipatterns.md
+      - instructions/skill/fig-leaf-signals.md
+      - instructions/skill/pre-claim.md
+      - instructions/skill/assertion-shape.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 120
+    toolsets:
+      - type: filesystem
+        # The j5-test-quality skill is installed under the home directory by scripts/install.ts.
+        allow_list: [".", "~/.agents/skills/j5-test-quality"]
+      - type: shell
+      - type: script
+        shell:
+          test_prescreen:
+            cmd: test-quality-prescreen
+            description: Runs the j5-test-quality pre-screen on the test files changed on this branch, including uncommitted changes and new files registered with `git add -N`; with `target`, on every test file under it. Reports HIGH findings as a failed call, and a failed run as an error.
+            args:
+              target:
+                type: string
+                description: Optional file or directory to scan, relative to the project root
 
   fixer:
+    model: fixer_model
     description: Finds why a test fails and fixes the cause, in the current checkout. Changes a test only with a written justification. Does not commit or push.
-    harness:
-      type: claude-code
-      model: claude-sonnet-5-5
-      effort: high
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/fixer.md
+      - instructions/skill/j5-test-quality.md
+      - instructions/skill/maintain-failing.md
+      - instructions/skill/mock-antipatterns.md
+      - instructions/skill/fig-leaf-signals.md
+      - instructions/skill/pre-claim.md
+      - instructions/skill/assertion-shape.md
+    add_prompt_files: [AGENTS.md, CLAUDE.md]
+    add_environment_info: true
+    max_iterations: 120
+    toolsets:
+      - type: filesystem
+        allow_list: [".", "~/.agents/skills/j5-test-quality"]
+      - type: shell
+      - type: script
+        shell:
+          test_prescreen:
+            cmd: test-quality-prescreen
+            description: Runs the j5-test-quality pre-screen on the test files changed on this branch, including uncommitted changes and new files registered with `git add -N`; with `target`, on every test file under it. Reports HIGH findings as a failed call, and a failed run as an error.
+            args:
+              target:
+                type: string
+                description: Optional file or directory to scan, relative to the project root
 
-# Effort levels, chosen with `j5 test-quality ... --effort <name>` (docker agent run
-# --flavor <name>). A flavor is a YAML patch deep-merged over this file. No flavor =
-# the file as written (auditor and reviewer on Opus 5.5, writer and fixer on Sonnet 5.5,
-# all at effort high). `low` steps each model down a tier and lowers the effort.
-# docker-agent ignores an unknown --flavor silently; j5 rejects names not listed here.
+  # Not an entry point: the auditor's reader. Read-only like the auditor, without the report tool.
+  reader:
+    model: reader_model
+    description: Reads the test files of one region and reports findings with file:line citations; read-only
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/reader.md
+    max_iterations: 60
+    toolsets:
+      - type: filesystem
+        allow_list: [".", "~/.agents/skills/j5-test-quality"]
+        tools: [read_file, read_multiple_files, list_directory, directory_tree, search_files_content]
+      - type: git
+
+# Every tool an agent here has is pre-approved, so no run waits on a confirmation prompt
+# (`--exec` rejects an unapproved tool). Rules are team-wide, not per agent, and `deny`
+# wins over `allow`. Patterns match the whole command and are case-insensitive, so they also
+# catch a mention inside a quoted message.
+# This is defense in depth, not a boundary: shell can still run anything the patterns miss.
+# The read-only roles (auditor, reviewer, reader) are enforced by tool selection: they are
+# given no shell and no write tool, so these rules never apply to them. The git rules below
+# back up the instructions of writer and fixer, which have a shell (`git add -N` stays allowed).
+permissions:
+  allow:
+    - shell
+    - read_file
+    - read_multiple_files
+    - list_directory
+    - directory_tree
+    - search_files_content
+    - write_file
+    - edit_file
+    - create_directory
+    - remove_directory
+    - git_status
+    - git_log
+    - git_branches
+    - git_show
+    - git_blame
+    - test_prescreen
+    - change_diff
+    - write_report
+  deny:
+    - "shell:cmd=*sudo*"
+    - "shell:cmd=*--no-verify*"
+    - "shell:cmd=*git commit*"
+    - "shell:cmd=*git push*"
+    - "shell:cmd=*git stash*"
+    - "shell:cmd=*git reset*"
+    - "shell:cmd=*git checkout*"
+    - "shell:cmd=*git restore*"
+    - "shell:cmd=*git switch*"
+    - "shell:cmd=*git clean*"
+    - "shell:cmd=*gh pr merge*"
+    - "shell:cmd=*gh pr ready*"
+    - "shell:cmd=*gh issue close*"
+    - "shell:cmd=*gh repo delete*"
+    - "shell:cmd=*gh release*"
+
+# Launch options, chosen with `j5 test-quality ... --model <tier> --effort <level>`: standard
+# flavors defined once in workflows/flavors.yaml and written into the block below by
+# `bun run flavors`. `flavors.models` in workflow.yaml lists the models they change (all five
+# here; --model puts all of them on one tier, which the file as written does not: the auditor and
+# reviewer are on Opus 4.7, the writer, fixer and reader on Sonnet 5.5, all at effort high).
+# docker-agent ignores an unknown --flavor silently; j5 rejects names the team does not define.
+# BEGIN GENERATED FLAVORS: written by `bun run flavors` from workflows/flavors.yaml and the
+# `flavors:` block of workflow.yaml. Edit those, not this block.
 flavors:
-  low:
-    agents:
-      auditor:
-        harness:
-          model: claude-sonnet-5-5
-          effort: low
-      reviewer:
-        harness:
-          model: claude-sonnet-5-5
-          effort: low
-      writer:
-        harness:
-          model: claude-haiku-4-5
-          effort: low
-      fixer:
-        harness:
-          model: claude-haiku-4-5
-          effort: low
+  model-haiku:
+    models:
+      auditor_model:
+        model: claude-haiku-5-5
+      reviewer_model:
+        model: claude-haiku-5-5
+      writer_model:
+        model: claude-haiku-5-5
+      fixer_model:
+        model: claude-haiku-5-5
+      reader_model:
+        model: claude-haiku-5-5
+  model-sonnet:
+    models:
+      auditor_model:
+        model: claude-sonnet-5-5
+      reviewer_model:
+        model: claude-sonnet-5-5
+      writer_model:
+        model: claude-sonnet-5-5
+      fixer_model:
+        model: claude-sonnet-5-5
+      reader_model:
+        model: claude-sonnet-5-5
+  model-opus:
+    models:
+      auditor_model:
+        model: claude-opus-5-5
+      reviewer_model:
+        model: claude-opus-5-5
+      writer_model:
+        model: claude-opus-5-5
+      fixer_model:
+        model: claude-opus-5-5
+      reader_model:
+        model: claude-opus-5-5
+  model-fable:
+    models:
+      auditor_model:
+        model: claude-fable-5-1
+      reviewer_model:
+        model: claude-fable-5-1
+      writer_model:
+        model: claude-fable-5-1
+      fixer_model:
+        model: claude-fable-5-1
+      reader_model:
+        model: claude-fable-5-1
+  effort-low:
+    models:
+      auditor_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      writer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      fixer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+      reader_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+  effort-medium:
+    models:
+      auditor_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      writer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      fixer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+      reader_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: medium
+  effort-high:
+    models:
+      auditor_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      writer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      fixer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+      reader_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+  effort-xhigh:
+    models:
+      auditor_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      writer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      fixer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+      reader_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+# END GENERATED FLAVORS

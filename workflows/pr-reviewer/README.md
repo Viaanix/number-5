@@ -32,7 +32,7 @@ From the project checkout:
 
 ```bash
 j5 pr-reviewer review --pr 123
-j5 pr-reviewer review --pr 123 --effort low
+j5 pr-reviewer review --pr 123 --model haiku --effort medium
 j5 pr-reviewer review --pr 123 --project ~/code/app --print
 ```
 
@@ -57,9 +57,13 @@ does not start Docker services or obtain credentials for you.
 | Selection | Model | Adaptive reasoning effort |
 |---|---|---|
 | Default | `claude-sonnet-5-5` | `high` |
-| `--effort low` | `claude-haiku-5-5` | `medium` |
+| `--model haiku\|sonnet\|opus\|fable` | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1` | unchanged |
+| `--effort low\|medium\|high\|xhigh` | unchanged | that effort |
 
-Both IDs are supplied by the proxy's versioned `models.json`. Catalogue presence
+The two options are independent. The flavors behind them are generated into `team.yaml` from `workflows/flavors.yaml` (`bun run flavors`).
+
+The model IDs are built into Pi 1.x (the proxy image mounts no `models.json`; a hand-written entry
+would replace the built-in definition and its adaptive-thinking metadata). Catalogue presence
 is not proof that an account can use a model. These two model/tool paths have
 live receipts below; there is no fallback to an older model on failure.
 
@@ -192,7 +196,7 @@ static review; missing essential evidence must not become an approval.
   Its actual calls were `pr_context`, `list_directory`, file reads/search, then
   `pr_context` again. It returned an SHA-identifying local report, exit 0, with
   the review worktree unchanged. Nothing was posted to GitHub.
-- The low flavor ran on `pi/claude-haiku-5-5`. With an untracked local file added
+- The old hand-written `low` flavor (Haiku 5.5, effort medium) ran on `pi/claude-haiku-5-5`; `--model haiku --effort medium` now selects the same pair. With an untracked local file added
   to the scratch worktree, it called only `pr_context`, returned BLOCKED with no
   verdict, and left the file intact.
 - Real PR #124 of a private repository, whose diff does not fit in one tool result

@@ -1,4 +1,3 @@
 *
 !package.json
-!bun.lock
-!patch-usage.ts
+!package-lock.json

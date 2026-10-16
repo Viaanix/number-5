@@ -24,7 +24,7 @@ docker agent run team.yaml --dry-run --flavor nope "x"   # exit 0 as well
 
 **Consequence:** `--flavor lwo` runs the team at its default settings and nothing tells you.
 
-**Mitigation:** `j5` reads the flavor names from `team.yaml` and rejects anything else (`launcher/src/parameters.ts`, `describeInvalidEffort`). Do the same check in any other wrapper.
+**Mitigation:** `j5` reads the `model-*` and `effort-*` flavor names from `team.yaml` and rejects any other `--model` / `--effort` value (`launcher/src/parameters.ts`, `describeInvalidChoice`). Do the same check in any other wrapper.
 
 ### A flavor that repeats the base values applies without a word
 
@@ -34,7 +34,7 @@ docker agent run team.yaml --dry-run --flavor nope "x"   # exit 0 as well
 
 **Consequence:** a flavor can look meaningful in review and change nothing.
 
-**Mitigation:** `bun run validate:teams` fails any flavor whose resolved config equals the base.
+**Mitigation:** `bun run validate:teams` compares each generated flavor's merged config with what its name promises (`model-opus` puts the tunable models on an Opus model, `effort-high` sets `reasoning_effort: high`), not with the base, because a flavor that is right can equal the base (`effort-high` on a team already at `high`).
 
 What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 - an unknown key: `agent:` instead of `agents:` → `unknown field "agent"`;
@@ -48,6 +48,50 @@ What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 **Receipt:** a flavor with `models: { lead: { model: claude-haiku-4-5 } }`, resolved with `docker agent debug config team.yaml --flavor low`, keeps `provider: anthropic` from the base and changes only `model`. With a flavor applied, `debug config` no longer prints the `flavors:` section.
 
 **Consequence:** a flavor only needs the keys it changes. Lists are not checked yet; assume a list in a flavor replaces the base list until someone verifies it.
+
+### A flavor that names a model the team does not have adds an incomplete model, silently
+
+**Observed:** v1.145.0, 2026-10-15.
+
+**Receipt:** a team with `models: { real: {provider: pi, model: claude-sonnet-5-5} }` and a flavor `typo: { models: { rael: { model: claude-haiku-5-5 } } }`: `docker agent debug config team.yaml --flavor typo` exits 0 and prints both `real` and a new `rael` with `model:` and no `provider`; `docker agent run … --flavor typo --dry-run --exec x` exits 0 as well.
+
+**Consequence:** a misspelled model name in a flavor changes nothing and reports nothing; the intended model keeps its base settings.
+
+**Mitigation:** the flavors are generated, and the generator refuses a tunable name that is not a model in `team.yaml` (`launcher/src/flavor-catalog.ts`, `resolveTuning`).
+
+### `--model` and `--effort` flavors patch different keys, so order does not matter
+
+**Observed:** v1.145.0, 2026-10-15, issue-team's generated flavors.
+
+**Receipt:** `docker agent debug config team.yaml --flavor model-haiku --flavor effort-xhigh --flavor reviewer-on-sonnet` and the same with `effort-xhigh` first printed identical models: builders, coordinator and tester on `claude-haiku-5-5` at `reasoning_effort: xhigh`, the reviewer on `claude-sonnet-5-5` at `xhigh`.
+
+**Consequence:** the launcher may pass them in any order; it passes model, effort, then j5's reviewer flavor, because the reviewer flavor must be read after the others to see the builders' tier.
+
+### The proxy takes `reasoning_effort` low, medium, high and xhigh, not max
+
+**Observed:** proxy with pi-openai-proxy 4.9.5, Pi 0.73.0, 2026-10-15.
+
+**Receipt:** one request per combination to `POST /v1/chat/completions` with `max_tokens: 64`, `reasoning_effort: <value>` and the prompt "Reply with the single word OK.", on `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-4-7`: `low`, `medium`, `high` and `xhigh` answered HTTP 200 on all three; `max` answered HTTP 400 `Invalid value for 'reasoning_effort': Invalid option: expected one of "none"|"minimal"|"low"|"medium"|…` on all three.
+
+**Consequence:** `workflows/flavors.yaml` lists `low`, `medium`, `high` and `xhigh`. Accepted is not the same as different: see the next entry for what Pi actually sends (`none` and `minimal` are accepted spellings too, and not offered).
+
+### Our `models.json` entries replace Pi's built-in model definitions, and with them adaptive effort
+
+**Observed:** 2026-10-16. Pi 0.73.0 (pi-ai 0.73.1) and Pi 1.3.0 (pi-ai 1.3.0), `containers/pi-openai-proxy/models.json` as committed.
+
+**Receipt:** the request body Pi would send to Anthropic, captured with no network and no credentials. With 1.3.0: `ModelRuntime.create({ authPath, modelsPath, refreshOnCreate: false })`, then `runtime.completeSimple(model, context, { reasoning: level, apiKey: "sk-ant-capture", maxRetries: 0, fetch })`, where `fetch` stores `JSON.parse(init.body)` and answers 400. With 0.73.0: `ModelRegistry.create(AuthStorage.inMemory({}))` and `completeSimple` with `onPayload` storing the payload and aborting the request.
+
+| Setup | `claude-sonnet-5-5` and `claude-haiku-5-5` | `claude-opus-4-7` |
+|---|---|---|
+| Pi 0.73.0, our `models.json` (the live proxy) | `thinking: {type: "enabled", budget_tokens: 2048 / 8192 / 16384 / 16384, display: "summarized"}` for low / medium / high / xhigh; no `output_config` | `thinking: {type: "adaptive"}`, `output_config.effort` low / medium / high / xhigh |
+| Pi 1.3.0, our `models.json` | the same legacy budgets (minimal 1024) | the same adaptive efforts |
+| Pi 1.3.0, its built-in definitions only (`modelsPath: null`) | `thinking: {type: "adaptive"}`, `output_config.effort: "high"` always, and the level in a trailing `{"role": "system", "content": [], "output_config": {"effort": "<level>"}}` message: low and xhigh requests differ only there | `output_config.effort` = the level |
+
+The metadata that selects adaptive thinking (`compat.forceAdaptiveThinking`, `thinkingLevelMap`, and for Claude 5 `supportsMidConvoEffort`) is on the built-in entries. A hand-written entry with the same id replaces it and drops all three (`compat=null thinkingLevelMap=null` in the capture), so Pi falls back to `budget_tokens`, and any level it cannot map falls through to `high`. Pi 1.3.0 lists `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1` as built-ins (`runtime.getModels("anthropic")`).
+
+**Image 4.9.6-1, captured inside the built image (2026-10-16).** The image from the Pi 1.x migration (Pi 1.3.0, no `models.json`; its own pinned packages, `modelsPath: null`) sends `thinking: {type: "adaptive"}` on `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1` with the level in the managed-effort message (`message:low`, `message:medium`, `message:high`, `message:xhigh`), and `output_config.effort` = the level on `claude-opus-4-7`: four distinct levels on all five models.
+
+**Consequence:** with the 4.9.5 image `--effort xhigh` is the same as `--effort high` for Sonnet and Haiku (builders, and the Haiku tier) and real only on Opus; with 4.9.6-1 and later it is real everywhere. Anthropic's compatibility page also calls manually budgeted thinking a legacy mode on current models (not tested here, from their documentation). `models.json` must not list models Pi already knows, or the legacy path comes back. Not tried: a live request showing the model's behavior differ between two levels; the capture proves what is sent, not what the model does with it.
 
 ## Running and dry runs
 
@@ -131,7 +175,7 @@ portability or thinking visibility through an OpenAI translator.
 
 **Why it matters:** Docker Agent builds its context size from the reported prompt and completion tokens (`SessionUsage`, `ContextLength: input + output`) and its proactive compaction decision from the same counters (`compaction.ShouldCompact(inputTokens, outputTokens, …, contextLimit, threshold)`). Reading the source at the installed commit, not testing it, this means the 90% trigger can never fire; only the after-the-fact overflow recovery remains, and that has not been exercised through the proxy. Cost shows `$0.00` for a separate reason (no price for `pi/…` models) and is not fixed by this.
 
-**Fix:** `containers/pi-openai-proxy/patch-usage.ts` rewrites `mapUsage()` at build time so `prompt_tokens` is the whole prompt (`input + cacheRead + cacheWrite`) with `prompt_tokens_details.cached_tokens` and `cache_write_tokens`, which Docker Agent's Chat Completions adapter (`oaistream/adapter.go`) subtracts to recover the fresh part. Verified offline (the diff is that one function; 4 + 9000 + 642 in gives `prompt_tokens` 9646, so 9646 + 4 = 9650 = `total_tokens`; a second run of the patch step exits 1) and **end to end**, 2026-10-15, after rebuilding and recreating the proxy: the same ~9,650-token streamed request that returned `prompt_tokens: 4` now returns `prompt_tokens: 9646, completion_tokens: 4, total_tokens: 9650`, with `cache_write_tokens: 9642` on the first call and `cached_tokens: 9642` on repeats; the non-streamed response agrees. **Not yet watched:** a real run's counters accumulating in the sidebar, and compaction firing.
+**Fix:** `prompt_tokens` is the whole prompt (`input + cacheRead + cacheWrite`) with `prompt_tokens_details.cached_tokens` and `cache_write_tokens`, which Docker Agent's Chat Completions adapter (`oaistream/adapter.go`) subtracts to recover the fresh part. With proxy 4.9.5 this was a build-time patch (`patch-usage.ts`, since removed); the fork the image now runs (4.9.6-1) has it in `mapUsage()`'s source, pinned by unit tests for the non-streamed response and the streamed usage chunk. Verified end to end twice: 2026-10-15 with the patch on 4.9.5, the same ~9,650-token streamed request that returned `prompt_tokens: 4` returned `prompt_tokens: 9646, completion_tokens: 4, total_tokens: 9650`, with `cache_write_tokens: 9642` on the first call and `cached_tokens: 9642` on repeats; and 2026-10-16 through the 4.9.6-1 image (copy of a login, compose hardening), a ~13k-token prompt returned `prompt_tokens: 13367` with `cache_write_tokens: 13363` on the first streamed call and `cached_tokens: 13363` on the second streamed call and on a non-streamed call. **Not yet watched:** a real run's counters accumulating in the sidebar, and compaction firing.
 
 ### A script tool result over 51,200 bytes is cut to its tail
 
@@ -232,10 +276,51 @@ still wins over `allow`.
 version 2.1.280 or newer is required (error_code: claude_code_version_too_old)
 ```
 
-`claude-sonnet-5-5` and `claude-haiku-5-5` through the same login work.
+`claude-sonnet-5-5` and `claude-haiku-5-5` through the same login work. So do
+`claude-opus-4-7`, `claude-opus-4-6` and `claude-opus-4-5`: one request each, with and without
+`reasoning_effort: high`, answered `OK` (2026-10-15).
 
-**Consequence:** the proxy's `models.json` does not list Opus 5.5, and issue-team's
-reviewer runs on Sonnet 5.5 where it used to run on Opus. Not tried: a newer Pi release.
+**Fable too.** `claude-fable-5-1`, added to a second proxy's catalogue (it shared the live login
+volume, so there was still one `auth.json`), failed the same way with
+`version 2.1.251 or newer is required`.
+
+**Consequence on image 4.9.5 and earlier:** the proxy's `models.json` did not list Opus 5.5 or
+Fable 5.1, and issue-team's reviewer ran on Opus 4.7, the newest Opus that worked.
+
+**Resolved on image 4.9.6-1 and later (2026-10-16).** `workflows/flavors.yaml` now maps `opus` to
+`claude-opus-5-5` and adds `fable` as `claude-fable-5-1`, above Opus on the independence ladder.
+A machine still on the old image fails on the first Opus call with the error above, so `j5`
+compares the running proxy container's image with the tag `compose.yaml` pins and warns at launch
+and in `j5 setup` ([issue #31](https://github.com/Viaanix/number-5/issues/31)). The check is a
+warning, not a gate, and "latest" means the pinned tag, not a registry lookup.
+
+**A newer Pi clears it (tried 2026-10-16).** The version in the error is the one Pi's Anthropic
+client sends, `user-agent: claude-cli/<claudeCodeVersion>`, a constant in
+`@earendil-works/pi-ai`. Reading that constant from the published packages: 0.75.0 to 0.84.4
+send 2.1.75, 0.85.0 and 0.86.0 send 2.1.251, 1.0.0 to 1.3.0 send 2.1.280. A container built from
+the fork's Pi 1.3.0 branch (a copy of the existing login in a throwaway volume, one request each)
+answered `OK` on `claude-opus-5-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-fable-5`,
+`claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-5-5` and `claude-haiku-5-5`; Opus 5.5 also
+passed a streamed request with usage and a tool call. Those probe requests used the repo's
+hand-written catalogue entries for the 5.5 models, so they took the legacy token-budget thinking
+path, not Pi 1.x's adaptive effort. Not tried: Fable on Pi 0.85.x (its floor
+is 2.1.251, so it should work there; inference), a long run, or token refresh under Pi 1.x.
+Details and the other forks reviewed: [proxy README](../../containers/pi-openai-proxy/README.md#upstream-status-and-the-fork).
+
+### `docker agent debug config` takes `--flavor` but not `--model`
+
+**Observed:** v1.145.0, 2026-10-15.
+
+**Receipt:** `docker agent debug config team.yaml --model reviewer=pi/claude-opus-4-7` fails
+(the usage line is `debug config <agent-file>|<registry-ref> [flavor...]`, and `--model` is
+only a flag of `run`). `--flavor` is repeatable and applied in order:
+`--flavor low --flavor reviewer-on-sonnet` printed the builders on `claude-haiku-5-5` and the
+reviewer on `claude-sonnet-5-5`.
+
+**Consequence:** the independence rule reads the real models with `debug config --flavor …`
+(`launcher/src/team-models.ts`) and picks the reviewer's tier with a flavor, not `--model`. A
+`--model` or `--flavor` after `--` would change the models unseen, so `j5` refuses both for a
+team with a rule.
 
 ### `permissions.deny` globs block the spellings they name, and not a branch called `fix-foo`
 

@@ -5,10 +5,13 @@
 //   5 → the agent could not run (a Claude session limit), which stops the queue.
 import { basename } from "node:path";
 
+import { answerDebugConfigCall } from "./fake-debug-config.ts";
+
 const WORKTREE_NUMBER_PATTERN = /-issue-(\d+)$/;
 const FAILURE_EXIT_CODE = 1;
 
 const commandArguments = process.argv.slice(2);
+answerDebugConfigCall(commandArguments);
 const workingDirectoryIndex = commandArguments.indexOf("--working-dir");
 const worktreePath = commandArguments[workingDirectoryIndex + 1] ?? "";
 const issueNumber = WORKTREE_NUMBER_PATTERN.exec(basename(worktreePath))?.[1] ?? "unknown";

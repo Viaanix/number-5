@@ -65,8 +65,12 @@ export type LaunchRequest = {
   repositoryName: string;
   /** Validated parameter values, keyed by parameter name. */
   parameterValues: Record<string, string>;
-  /** A flavor name from the team's team.yaml, or undefined for the team's defaults. */
-  effort: string | undefined;
+  /**
+   * The flavors to enable, in the order docker-agent applies them: the user's `--model` and
+   * `--effort` flavors first, then the ones j5 chose itself (the reviewer's tier,
+   * launcher/src/reviewer-flavor.ts), which must see the models the user's flavors set.
+   */
+  flavorNames: string[];
   /** Ref a new worktree branches from; required when the worktree mode is `new`. */
   baseRef: string | undefined;
   /** What exists at the worktree path; required when the worktree mode is `new` or `pr`. */
@@ -226,8 +230,8 @@ export function buildLaunchPlan(request: LaunchRequest): LaunchPlan {
     "--agent",
     entryPoint.agent,
   ];
-  if (request.effort !== undefined) {
-    commandWords.push("--flavor", request.effort);
+  for (const flavorName of request.flavorNames) {
+    commandWords.push("--flavor", flavorName);
   }
 
   let preparationSteps: string[][] = [];

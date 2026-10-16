@@ -2,7 +2,7 @@
 
 Patterns that the teams in this repository use on purpose. Each one names the problem it solves and where to see it. `workflows/issue-team/` is the reference implementation; read its `team.yaml`, `workflow.yaml` and `instructions/` alongside this page.
 
-**Two kinds of agent.** issue-team and pr-reviewer run native docker-agent agents on the local Pi proxy, with their own tools, instruction files, sub-agents and permission rules. test-quality runs Claude Code harness agents (`harness: claude-code`, on a Claude subscription, no API key). A harness agent gets nothing but its task message: instruction files, toolsets, skills, `sub_agents`, `add_prompt_files` and `permissions` are dropped ([gotcha](gotchas.md#a-harness-claude-code-agent-gets-none-of-docker-agents-agent-extras)). Patterns marked *(native agents)* need docker-agent's own model agents.
+**Two kinds of agent.** Every team here (issue-team, pr-reviewer, test-quality) runs native docker-agent agents on the local Pi proxy, with their own tools, instruction files, sub-agents and permission rules. docker-agent can also run Claude Code harness agents (`harness: claude-code`, on a Claude subscription, no API key); no team uses one now, and the harness notes below remain for anyone who does. A harness agent gets nothing but its task message: instruction files, toolsets, skills, `sub_agents`, `add_prompt_files` and `permissions` are dropped ([gotcha](gotchas.md#a-harness-claude-code-agent-gets-none-of-docker-agents-agent-extras)). Patterns marked *(native agents)* need docker-agent's own model agents.
 
 Add a pattern when a second team uses it, or when a team uses it to fix a failure you saw. Say which failure.
 
@@ -22,6 +22,9 @@ A sub-agent does not see the coordinator's conversation. Instructions spell out 
 
 ### A read-only reviewer
 With native agents the reviewer gets `git` (read-only), file reads without `write_file`, and one script tool for the diff, so it cannot edit or run the project. A harness reviewer has Claude Code's full tool set: read-only is an instruction it is trusted to keep, and its prompt says so. Verification results reach it as *claims* from the team, and it is told to weigh them as claims.
+
+### A reviewer on a different model class than the builders
+A model reviewing work from its own class shares its blind spots. The manifest's `independence` block names the reviewer and the agents it reviews; team.yaml offers `reviewer-on-<tier>` flavors that each patch only the reviewer's model; `j5` reads the real models after the effort is applied and picks the tier one step above the builders (one below from the top), then verifies the result and refuses to launch otherwise. A flavor is used instead of `--model` so the reviewer keeps its `reasoning_effort`. See `docs/launcher.md`.
 
 ### Fixed output templates for agent-to-agent reports
 The reviewer answers in an exact template (`VERDICT: ...`, then fixed sections, "None" when empty). The coordinator can act on it without parsing prose, and a missing section is visible.
@@ -62,5 +65,5 @@ Each entry point that changes code runs in its own worktree beside the user's ch
 
 ## Effort
 
-### Effort is a flavor
-A team defines its effort levels as `flavors:` in `team.yaml` — a lower `harness.effort` and a cheaper `harness.model` for harness agents, cheaper models for native ones — and `j5 --effort <flavor>` selects one. No flavor means the file as written. Keep each flavor minimal (flavors deep-merge) and let `validate:teams` prove it changes something.
+### Model and effort are standard, generated flavors
+Every team offers the same two options, `--model <tier>` and `--effort <level>`, as flavors named `model-<tier>` and `effort-<level>`. docker-agent cannot share flavor definitions between files (they live in each `team.yaml`; its own idea of reuse is the same names everywhere), so `workflows/flavors.yaml` defines them once and `bun run flavors` writes each team's block from it and from the team's list of tunable models. Model and effort flavors patch different keys, so they combine in either order, and no flavor means the file as written. `validate:teams` proves each flavor does what its name says from docker-agent's merged config, because a flavor that repeats the base values changes nothing and applies without a word. Where a team keeps a reviewer off the builders' model class, the reviewer's own flavors are `j5`'s, not the user's.
