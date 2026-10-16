@@ -344,6 +344,8 @@ You only do this once per computer. To check later:
 j5 setup --check --proxy
 ```
 
+Both `j5 setup --check --proxy` and a launch compare the running proxy's image with the one this version of j5 pins, and warn when they differ. If you see that warning after updating j5, run `j5 setup --proxy` to recreate the proxy on the new image; your login is kept.
+
 ## Step 7: Your first run
 
 You have to be in a git project, or name one with `--project`. Use a **practice repository** you are allowed to experiment in, not a production one.

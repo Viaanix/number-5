@@ -154,6 +154,8 @@ Every team offers the same two launch options, `--model <tier>` and `--effort <l
 
 `--model` and `--effort` combine in either order (they patch different keys), and with neither, the team runs as `team.yaml` is written. Passing only `--effort low` therefore changes reasoning effort and nothing else; it no longer means "the cheap preset". Whether two levels differ upstream depends on the proxy image: with the 4.9.5 image `xhigh` equals `high` on Sonnet and Haiku, and with 4.9.6-1 and later all four levels are distinct ([gotcha](docker-agent/gotchas.md#our-modelsjson-entries-replace-pis-built-in-model-definitions-and-with-them-adaptive-effort)). `bun run validate:teams` fails when a block is out of date, when a flavor's merged config does not do what its name says, and for any flavor name no option can reach. Logic: `launcher/src/flavor-catalog.ts`, `scripts/generate-flavors.ts`.
 
+**Proxy image check.** The `opus` and `fable` tiers need proxy image 4.9.6-1 or later. Before a launch that is not `--print`, `j5` finds the running proxy container by its Compose labels and compares its image with the `image:` tag in the `compose.yaml` that ships with this `j5`; on a difference it prints a `j5: warning:` line and carries on. `j5 setup --check --proxy` and a real `j5 setup --proxy` report the same comparison. "Latest" means that pinned tag, not a registry lookup, and anything the check cannot learn (no Docker, no proxy container) prints nothing. Logic: `launcher/src/proxy-image.ts`.
+
 **Queue block.** An entry point can also run over a queue:
 
 ```yaml
