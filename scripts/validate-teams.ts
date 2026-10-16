@@ -22,14 +22,18 @@ import { readFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
+import { z } from "zod";
+
 import { readPathValue, withPathValue } from "#launcher/environment.ts";
 import {
   FLAVOR_CATALOG_FILE_NAME,
   EFFORT_FLAVOR_PREFIX,
   MODEL_FLAVOR_PREFIX,
+  QUEUE_FLAVOR_NAME,
   hasGeneratedSection,
   loadFlavorCatalog,
   planTeamFlavors,
+  queueApprovedTools,
   replaceGeneratedSection,
   resolveTuning,
   type FlavorCatalog,
@@ -194,6 +198,53 @@ function checkFlavorEffects(
   return problems;
 }
 
+const mergedConfigSchema = z.looseObject({
+  permissions: z.looseObject({ allow: z.array(z.string()) }).optional(),
+});
+
+/** The merged config as comparable text, without the keys the queue flavor is allowed to change. */
+function withoutPermissionsAndFlavors(config: Record<string, unknown>): string {
+  return JSON.stringify(
+    Object.entries(config).filter(([key]) => key !== "permissions" && key !== "flavors"),
+  );
+}
+
+/**
+ * Step 5b: the queue flavor approves exactly the tools the entry points' `queue.approves` name, on
+ * top of team.yaml's own allow list, and changes nothing else. A merge rule that appended instead
+ * of replaced, or a generator slip, would otherwise show up only when an unattended run rejected
+ * a tool or approved one nobody listed. docker-agent drops the `flavors:` block from a flavored
+ * config, so that key is left out of the comparison along with the permissions.
+ */
+function checkQueueFlavorEffect(team: WorkflowManifest): string[] {
+  const approvedTools = queueApprovedTools(team);
+  if (approvedTools.length === 0) {
+    return [];
+  }
+  const base = runDockerAgent(["debug", "config", team.teamConfigPath], team);
+  const flavored = runDockerAgent(
+    ["debug", "config", team.teamConfigPath, "--flavor", QUEUE_FLAVOR_NAME],
+    team,
+  );
+  const failed = [base, flavored].find((result) => result.exitCode !== SUCCESS_EXIT_CODE);
+  if (failed !== undefined) {
+    return [`flavor ${QUEUE_FLAVOR_NAME}: docker agent debug config failed:\n${failed.output}`];
+  }
+  const baseConfig = mergedConfigSchema.parse(Bun.YAML.parse(base.output));
+  const flavoredConfig = mergedConfigSchema.parse(Bun.YAML.parse(flavored.output));
+  const problems: string[] = [];
+  const expectedAllow = [...(baseConfig.permissions?.allow ?? []), ...approvedTools];
+  if (JSON.stringify(flavoredConfig.permissions?.allow) !== JSON.stringify(expectedAllow)) {
+    problems.push(
+      `flavor ${QUEUE_FLAVOR_NAME}: permissions.allow is ${JSON.stringify(flavoredConfig.permissions?.allow)}, not team.yaml's list plus ${approvedTools.join(", ")}`,
+    );
+  }
+  if (withoutPermissionsAndFlavors(baseConfig) !== withoutPermissionsAndFlavors(flavoredConfig)) {
+    problems.push(`flavor ${QUEUE_FLAVOR_NAME}: changes something besides permissions.allow`);
+  }
+  return problems;
+}
+
 /** Every way a user can combine --model and --effort, each as the flavors it selects. */
 function userFlavorCombinations(modelTiers: string[], effortLevels: string[]): string[][] {
   const modelChoices = [undefined, ...modelTiers.map((tier) => `${MODEL_FLAVOR_PREFIX}${tier}`)];
@@ -265,6 +316,7 @@ function validateTeam(team: WorkflowManifest, catalog: FlavorCatalog): string[] 
       runDockerAgentInTeam,
     ),
   );
+  problems.push(...checkQueueFlavorEffect(team));
   if (team.independence !== undefined && reviewerFlavorNames.length === 0) {
     problems.push("independence: team.yaml has no reviewer-on-<tier> flavors to choose from");
   }
@@ -287,6 +339,12 @@ function validateTeam(team: WorkflowManifest, catalog: FlavorCatalog): string[] 
       `${MODEL_FLAVOR_PREFIX}${firstModelTier}`,
       `${EFFORT_FLAVOR_PREFIX}${firstEffortLevel}`,
     ]);
+  }
+  if (queueApprovedTools(team).length > 0) {
+    dryRunVariants.push([QUEUE_FLAVOR_NAME]);
+    if (firstModelTier !== undefined) {
+      dryRunVariants.push([`${MODEL_FLAVOR_PREFIX}${firstModelTier}`, QUEUE_FLAVOR_NAME]);
+    }
   }
   const entryPointAgents = [
     ...new Set(Object.values(team.entrypoints).map((entry) => entry.agent)),

@@ -30,6 +30,8 @@ const SAMPLE_MANIFEST: WorkflowManifest = {
       queue: {
         parameter: "issue",
         preamble: "Queue item {position} of {count} in {repo}: {round_limit}.",
+        items: "issues",
+        approves: [],
       },
     },
     "pr-followup": {
@@ -282,6 +284,37 @@ describe("buildLaunchPlan — pull request worktree", () => {
     );
     expect(plan.preparationSteps).toEqual([]);
     expect(plan.workingDirectory).toBe(PULL_REQUEST_WORKTREE_PATH);
+  });
+
+  // Catches a re-review of a PR that gained a commit running on the commit the first review
+  // used: a kept snapshot reused as it was left makes pr_context refuse it as stale, so the PR
+  // could never be reviewed again until someone deleted the directory by hand.
+  test("moves a kept detached review snapshot to the freshly fetched PR head", () => {
+    const plan = buildLaunchPlan(
+      buildRequest({
+        entryPointName: "pr-review",
+        parameterValues: { pr: "456" },
+        worktree: { state: { kind: "reusable" }, pullRequestBranch },
+      }),
+    );
+    const snapshotPath = `${PULL_REQUEST_WORKTREE_PATH}-detached`;
+    expect(plan.preparationSteps).toEqual([
+      ["git", "-C", snapshotPath, "fetch", "origin", "feature/login"],
+      ["git", "-C", snapshotPath, "checkout", "--detach", "FETCH_HEAD"],
+    ]);
+    expect(plan.workingDirectory).toBe(snapshotPath);
+  });
+
+  test("needs the PR's branch to refresh a kept detached snapshot", () => {
+    expect(() =>
+      buildLaunchPlan(
+        buildRequest({
+          entryPointName: "pr-review",
+          parameterValues: { pr: "456" },
+          worktree: { state: { kind: "reusable" }, pullRequestBranch: undefined },
+        }),
+      ),
+    ).toThrow("entry point 'pr-review' needs the PR's branch to refresh its review worktree");
   });
 
   test("refuses when the PR worktree path belongs to another repository", () => {

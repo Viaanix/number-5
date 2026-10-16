@@ -5,6 +5,8 @@
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { pullRequestListingsSchema, selectUnreviewedPullRequests } from "./review-status.ts";
+
 /** The remote every lookup and fetch uses, as everywhere else in the launcher. */
 export const ORIGIN_REMOTE_NAME = "origin";
 
@@ -212,9 +214,9 @@ export function resolvePullRequestBranch(
   return branchName;
 }
 
-// GitHub returns at most this many issues for one label; a queue longer than this is
-// not something to run unattended in one go.
-const LABEL_ISSUE_LIMIT = 200;
+// GitHub returns at most this many issues or pull requests for one listing; a queue longer than
+// this is not something to run unattended in one go.
+const LISTING_LIMIT = 200;
 
 function isIssueNumberEntry(entry: unknown): entry is { number: number } {
   return (
@@ -246,7 +248,7 @@ export function listOpenIssuesWithLabel(repositoryRoot: string, label: string): 
       "--json",
       "number",
       "--limit",
-      String(LABEL_ISSUE_LIMIT),
+      String(LISTING_LIMIT),
     ],
     repositoryRoot,
   );
@@ -265,4 +267,94 @@ export function listOpenIssuesWithLabel(repositoryRoot: string, label: string): 
     .map((entry) => entry.number)
     .toSorted((left, right) => left - right)
     .map(String);
+}
+
+/**
+ * Lists the numbers of the repository's open pull requests that carry the label, oldest first,
+ * with `gh pr list`. Needs a gh login (or GH_TOKEN) that can see the repository.
+ * @throws Error when gh fails or prints something other than a list of pull request numbers.
+ */
+export function listOpenPullRequestsWithLabel(repositoryRoot: string, label: string): string[] {
+  const result = runCommand(
+    [
+      "gh",
+      "pr",
+      "list",
+      "--label",
+      label,
+      "--state",
+      "open",
+      "--json",
+      "number",
+      "--limit",
+      String(LISTING_LIMIT),
+    ],
+    repositoryRoot,
+  );
+  if (result.exitCode !== SUCCESS_EXIT_CODE) {
+    throw new Error(
+      `gh pr list --label ${label} failed: ${result.standardError}; --queue-label needs a gh login (or GH_TOKEN) that can see this repository`,
+    );
+  }
+  const parsed: unknown = JSON.parse(result.standardOutput);
+  if (!Array.isArray(parsed) || !parsed.every(isIssueNumberEntry)) {
+    throw new Error(
+      `gh pr list printed something other than pull request numbers: ${result.standardOutput}`,
+    );
+  }
+  return parsed
+    .map((entry) => entry.number)
+    .toSorted((left, right) => left - right)
+    .map(String);
+}
+
+/**
+ * Lists the numbers of the repository's open, non-draft pull requests that the logged-in gh
+ * account has not reviewed at their current head commit, oldest first (the rule is in
+ * review-status.ts), and separately the unreviewed ones from forks, which j5 cannot review.
+ * Needs a gh login (or GH_TOKEN) that can see the repository.
+ * @throws Error when gh fails, prints something unexpected, or the repository has so many open
+ *   pull requests that the listing may have been cut short (a cut listing would silently skip the
+ *   oldest ones).
+ */
+export function listUnreviewedPullRequests(repositoryRoot: string): {
+  pullRequests: string[];
+  skippedForks: string[];
+} {
+  const account = runCommand(["gh", "api", "user", "--jq", ".login"], repositoryRoot);
+  if (account.exitCode !== SUCCESS_EXIT_CODE || account.standardOutput === "") {
+    throw new Error(
+      `gh could not tell which account is logged in: ${account.standardError}; --queue-unreviewed needs a gh login (or GH_TOKEN) that can see this repository`,
+    );
+  }
+  const result = runCommand(
+    [
+      "gh",
+      "pr",
+      "list",
+      "--state",
+      "open",
+      "--json",
+      "number,isDraft,isCrossRepository,headRefOid,comments",
+      "--limit",
+      String(LISTING_LIMIT),
+    ],
+    repositoryRoot,
+  );
+  if (result.exitCode !== SUCCESS_EXIT_CODE) {
+    throw new Error(`gh pr list failed: ${result.standardError}`);
+  }
+  const parsed = pullRequestListingsSchema.safeParse(JSON.parse(result.standardOutput));
+  if (!parsed.success) {
+    throw new Error(
+      `gh pr list printed something other than pull requests: ${parsed.error.message}`,
+    );
+  }
+  if (parsed.data.length >= LISTING_LIMIT) {
+    throw new Error(
+      `${parsed.data.length} open pull requests: the listing may be cut short, so some would be skipped silently; use --queue-label or --queue to name them`,
+    );
+  }
+  const { reviewable, forks } = selectUnreviewedPullRequests(parsed.data, account.standardOutput);
+  return { pullRequests: reviewable.map(String), skippedForks: forks.map(String) };
 }

@@ -103,6 +103,22 @@ export function addPullRequestToOrigin(projectRoot: string, pullRequestNumber: n
 }
 
 /**
+ * Publishes a pull request the way a fork's looks to git: `refs/pull/<number>/head` exists, but
+ * no branch of origin is at that commit, so the PR's branch cannot be found.
+ */
+export function addForkPullRequestToOrigin(projectRoot: string, pullRequestNumber: number): void {
+  runGit(projectRoot, [
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    "-m",
+    `fork work for PR ${pullRequestNumber}`,
+  ]);
+  runGit(projectRoot, ["push", "--quiet", "origin", `HEAD:refs/pull/${pullRequestNumber}/head`]);
+  runGit(projectRoot, ["reset", "--quiet", "--hard", "HEAD~1"]);
+}
+
+/**
  * Writes a team directory: workflow.yaml and team.yaml with the given contents.
  * Returns the path of workflow.yaml.
  */

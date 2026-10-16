@@ -18,10 +18,12 @@ import { basename, join, resolve } from "node:path";
 import { findUnknownOptionNames, type ParsedArguments, parseArguments } from "./arguments.ts";
 import { formatBanner } from "./banner.ts";
 import { readPathValue } from "./environment.ts";
-import { EFFORT_FLAVOR_PREFIX, MODEL_FLAVOR_PREFIX } from "./flavor-catalog.ts";
+import { EFFORT_FLAVOR_PREFIX, MODEL_FLAVOR_PREFIX, QUEUE_FLAVOR_NAME } from "./flavor-catalog.ts";
 import {
   inspectWorktreePath,
   listOpenIssuesWithLabel,
+  listOpenPullRequestsWithLabel,
+  listUnreviewedPullRequests,
   listRemoteBranches,
   localBranchExists,
   refExists,
@@ -29,7 +31,11 @@ import {
   resolveGitToplevel,
   resolvePullRequestBranch,
 } from "./git.ts";
-import type { EntryPointDefinition, WorkflowManifest } from "./manifest.ts";
+import {
+  QUEUE_PLACEHOLDERS,
+  type EntryPointDefinition,
+  type WorkflowManifest,
+} from "./manifest.ts";
 import { readPackageInfo } from "./package-info.ts";
 import { describeInvalidChoice, describeInvalidParameterValue } from "./parameters.ts";
 import {
@@ -56,7 +62,7 @@ import {
   type RoundLimit,
 } from "./queue.ts";
 import { chooseAutomaticFlavors } from "./reviewer-flavor.ts";
-import { runPlan, runQueue } from "./run.ts";
+import { runPlan, runQueue, type QueueRunItem } from "./run.ts";
 import { createSetupEnvironment, runCapturedCommand, runSetup } from "./setup.ts";
 import { renderPlanAsShellCommand, shellDialectForPlatform } from "./shell-quote.ts";
 import { readTeamConfigSummary } from "./team-config.ts";
@@ -91,6 +97,7 @@ const UNATTENDED_FLAG = "--exec";
 const QUEUE_SOURCE_SINGLE = "single";
 const QUEUE_SOURCE_VALUES = "values";
 const QUEUE_SOURCE_LABEL = "label";
+const QUEUE_SOURCE_UNREVIEWED = "unreviewed";
 
 /** A mistake in how j5 was called; reported with a pointer to --help. */
 class UsageError extends Error {
@@ -139,7 +146,8 @@ function formatUsage(): string {
     "  --model <tier>     model tier for the team's builders: haiku, sonnet or opus, as the team offers (default: team.yaml as written)",
     "  --effort <level>   reasoning effort: low, medium, high or xhigh, as the team offers (default: team.yaml as written)",
     "  --queue <n,n,...>  run the entry point once per value, unattended (entry points with a queue)",
-    "  --queue-label <l>  the same, over every open issue with this label (needs gh access to the repo)",
+    "  --queue-label <l>  the same, over every open issue (or pull request) with this label (needs gh access to the repo)",
+    "  --queue-unreviewed the same, over every open non-draft pull request this gh account has not reviewed at its latest commit",
     "  --max-rounds <n>   fix rounds per queue item, or 'none' for no limit (default 5)",
     "  --print            print the command instead of running it",
     "  --version          the installed version",
@@ -154,6 +162,7 @@ function formatUsage(): string {
     "  j5 issue-team work-issue --issue 123 --model haiku --effort medium",
     "  j5 pr-reviewer review --pr 456 --project ~/code/app -- --safety balanced",
     "  j5 issue-team work-issue --queue 474,480 --max-rounds 5",
+    "  j5 pr-reviewer review --queue-unreviewed --project ~/code/app",
   ].join("\n");
 }
 
@@ -373,21 +382,53 @@ async function collectParameterValues(
   return parameterValues;
 }
 
+/** The singular noun for what a queue's numbers are, for prompts and messages. */
+function describeQueueItem(items: NonNullable<EntryPointDefinition["queue"]>["items"]): string {
+  return items === "pull-requests" ? "pull request" : "issue";
+}
+
 /** Where a queue's values come from, before the project is known. */
-type QueueSource = { kind: "values"; values: string[] } | { kind: "label"; label: string };
+type QueueSource =
+  | { kind: "values"; values: string[] }
+  | { kind: "label"; label: string }
+  | { kind: "unreviewed" };
 
 /** A queue run's choices; undefined from chooseQueue means a single run. */
 type QueueChoice = { parameterName: string; source: QueueSource; roundLimit: RoundLimit };
 
 /**
+ * The numbers a queue runs over: the ones given, or the ones gh lists in the project's repository.
+ * `skippedForks` are unreviewed pull requests from forks that `--queue-unreviewed` left out.
+ */
+function listQueueValues(
+  source: QueueSource,
+  items: NonNullable<EntryPointDefinition["queue"]>["items"],
+  projectRoot: string,
+): { values: string[]; skippedForks: string[] } {
+  if (source.kind === "values") {
+    return { values: source.values, skippedForks: [] };
+  }
+  if (source.kind === "label") {
+    const values =
+      items === "pull-requests"
+        ? listOpenPullRequestsWithLabel(projectRoot, source.label)
+        : listOpenIssuesWithLabel(projectRoot, source.label);
+    return { values, skippedForks: [] };
+  }
+  const { pullRequests, skippedForks } = listUnreviewedPullRequests(projectRoot);
+  return { values: pullRequests, skippedForks };
+}
+
+/**
  * Decides between a single run and a queue run, from --queue / --queue-label /
- * --max-rounds or, in a terminal, by asking. Only entry points with a `queue:` block
- * can run as a queue.
+ * --queue-unreviewed / --max-rounds or, in a terminal, by asking. Only entry points with a
+ * `queue:` block can run as a queue.
  */
 async function chooseQueue(
   entryPointName: string,
   entryPoint: EntryPointDefinition,
   optionValues: Map<string, string>,
+  requestedUnreviewed: boolean,
   interaction: Interaction,
 ): Promise<QueueChoice | undefined> {
   const requestedValues = optionValues.get("queue");
@@ -398,10 +439,11 @@ async function chooseQueue(
     if (
       requestedValues !== undefined ||
       requestedLabel !== undefined ||
+      requestedUnreviewed ||
       requestedRoundLimit !== undefined
     ) {
       throw new UsageError(
-        `--queue, --queue-label and --max-rounds only apply to entry points with a queue; ${entryPointName} has none`,
+        `--queue, --queue-label, --queue-unreviewed and --max-rounds only apply to entry points with a queue; ${entryPointName} has none`,
       );
     }
     return undefined;
@@ -409,10 +451,22 @@ async function chooseQueue(
   if (requestedValues !== undefined && requestedLabel !== undefined) {
     throw new UsageError("--queue and --queue-label are alternatives; give one");
   }
-  const singleValueGiven = optionValues.has(queue.parameter);
-  if (singleValueGiven && (requestedValues !== undefined || requestedLabel !== undefined)) {
+  const queuedByLaunchOption =
+    requestedValues !== undefined || requestedLabel !== undefined || requestedUnreviewed;
+  if (requestedUnreviewed && (requestedValues !== undefined || requestedLabel !== undefined)) {
     throw new UsageError(
-      `--${queue.parameter} runs one item; --queue / --queue-label run several; give one`,
+      "--queue-unreviewed is an alternative to --queue and --queue-label; give one",
+    );
+  }
+  if (requestedUnreviewed && queue.items !== "pull-requests") {
+    throw new UsageError(
+      `--queue-unreviewed only applies to a queue of pull requests; ${entryPointName} queues ${queue.items}`,
+    );
+  }
+  const singleValueGiven = optionValues.has(queue.parameter);
+  if (singleValueGiven && queuedByLaunchOption) {
+    throw new UsageError(
+      `--${queue.parameter} runs one item; --queue / --queue-label / --queue-unreviewed run several; give one`,
     );
   }
 
@@ -425,6 +479,8 @@ async function chooseQueue(
     source = { kind: "values", values: parsed.values };
   } else if (requestedLabel !== undefined) {
     source = { kind: "label", label: requestedLabel };
+  } else if (requestedUnreviewed) {
+    source = { kind: "unreviewed" };
   } else if (!singleValueGiven && interaction.canPrompt) {
     interaction.askedAnything = true;
     const sourceKind = await askToChoose(`Run ${entryPointName} on`, [
@@ -436,9 +492,18 @@ async function chooseQueue(
       },
       {
         value: QUEUE_SOURCE_LABEL,
-        label: `every open issue with a label`,
+        label: `every open ${describeQueueItem(queue.items)} with a label`,
         hint: "unattended; needs gh access",
       },
+      ...(queue.items === "pull-requests"
+        ? [
+            {
+              value: QUEUE_SOURCE_UNREVIEWED,
+              label: "every open pull request not yet reviewed at its latest commit",
+              hint: "unattended; needs gh access",
+            },
+          ]
+        : []),
     ]);
     if (sourceKind === QUEUE_SOURCE_VALUES) {
       const answer = await askForText(
@@ -458,11 +523,15 @@ async function chooseQueue(
         value.trim() === "" ? "a label is needed" : undefined,
       );
       source = { kind: "label", label: label.trim() };
+    } else if (sourceKind === QUEUE_SOURCE_UNREVIEWED) {
+      source = { kind: "unreviewed" };
     }
   }
   if (source === undefined) {
     if (requestedRoundLimit !== undefined) {
-      throw new UsageError("--max-rounds only applies with --queue or --queue-label");
+      throw new UsageError(
+        "--max-rounds only applies with --queue or --queue-label (or --queue-unreviewed)",
+      );
     }
     return undefined;
   }
@@ -499,7 +568,11 @@ function resolveWorktreeFacts(
   }
   const state = inspectWorktreePath(projectRoot, worktreeLocation.path);
   let pullRequestBranch: WorktreeFacts["pullRequestBranch"];
-  if (entryPoint.worktree.mode === "pr" && state.kind === "absent") {
+  const keptDetachedSnapshot =
+    entryPoint.worktree.mode === "pr" &&
+    entryPoint.worktree.detached === true &&
+    state.kind === "reusable";
+  if (entryPoint.worktree.mode === "pr" && (state.kind === "absent" || keptDetachedSnapshot)) {
     // Read-only, over git's own transport (SSH for an SSH origin): no gh login needed.
     const branchName = resolvePullRequestBranch(
       projectRoot,
@@ -622,6 +695,7 @@ async function launch(
     entryPointName,
     entryPoint,
     parsedArguments.optionValues,
+    parsedArguments.switches.has("queue-unreviewed"),
     interaction,
   );
   const parameterValues = await collectParameterValues(
@@ -636,6 +710,7 @@ async function launch(
     values: Record<string, string>,
     queueItem: QueueItemContext | undefined,
     passthroughArguments: string[],
+    queueFlavorNames: string[] = [],
   ): LaunchPlan =>
     buildLaunchPlan({
       manifest: team,
@@ -643,7 +718,7 @@ async function launch(
       projectRoot,
       repositoryName,
       parameterValues: values,
-      flavorNames: [...userFlavors, ...automaticFlavors.flavorNames],
+      flavorNames: [...userFlavors, ...automaticFlavors.flavorNames, ...queueFlavorNames],
       baseRef,
       worktree: resolveWorktreeFacts(
         team,
@@ -661,30 +736,82 @@ async function launch(
     renderPlanAsShellCommand(plan, team.pathDirectories, shellDialectForPlatform(process.platform));
 
   if (queueChoice !== undefined) {
-    const queueValues =
-      queueChoice.source.kind === "values"
-        ? queueChoice.source.values
-        : listOpenIssuesWithLabel(projectRoot, queueChoice.source.label);
-    if (queueValues.length === 0 && queueChoice.source.kind === "label") {
-      throw new UsageError(`no open issues have the label '${queueChoice.source.label}'`);
+    const queueDefinition = entryPoint.queue;
+    if (queueDefinition === undefined) {
+      throw new Error("a queue choice was made for an entry point without a queue");
     }
+    const { values: queueValues, skippedForks } = listQueueValues(
+      queueChoice.source,
+      queueDefinition.items,
+      projectRoot,
+    );
+    if (skippedForks.length > 0) {
+      console.error(
+        `j5: skipped ${skippedForks.length} pull request(s) from forks, which j5 cannot review (the reviewer works on a branch of this repository): ${skippedForks.map((number) => `#${number}`).join(", ")}`,
+      );
+    }
+    if (queueValues.length === 0 && queueChoice.source.kind === "label") {
+      throw new UsageError(
+        `no open ${describeQueueItem(queueDefinition.items)}s have the label '${queueChoice.source.label}'`,
+      );
+    }
+    if (queueValues.length === 0) {
+      // The normal outcome of a nightly run that has already caught up, so not an error.
+      console.error(
+        "j5: no open pull request needs a review: each is a draft, from a fork, or already has this account's review of its latest commit",
+      );
+      return EXIT_CODE_SUCCESS;
+    }
+    // An unattended run cannot answer docker-agent's approval prompts, so the tools the entry
+    // point says it must call are approved by the generated queue flavor.
+    const queueFlavorNames = queueDefinition.approves.length > 0 ? [QUEUE_FLAVOR_NAME] : [];
     const unattendedPassthrough = parsedArguments.passthroughArguments.includes(UNATTENDED_FLAG)
       ? parsedArguments.passthroughArguments
       : [...parsedArguments.passthroughArguments, UNATTENDED_FLAG];
     const roundLimitText = describeRoundLimit(queueChoice.roundLimit);
-    const queueItems = queueValues.map((value, index) => ({
-      value,
-      plan: buildPlan(
-        { ...parameterValues, [queueChoice.parameterName]: value },
-        { position: index + 1, count: queueValues.length, roundLimitText },
-        unattendedPassthrough,
-      ),
-    }));
+    // An item that cannot be planned (a pull request from a fork, or one whose pull ref lags a
+    // push) fails as that item and the others still run. When none can be planned the first
+    // error is raised as it is, so a mistake that affects every item (a bad worktree name, say)
+    // still stops the run with its own message.
+    let firstPlanningFailure: unknown;
+    const queueItems: QueueRunItem[] = queueValues.map((value, index) => {
+      try {
+        return {
+          value,
+          plan: buildPlan(
+            { ...parameterValues, [queueChoice.parameterName]: value },
+            { position: index + 1, count: queueValues.length, roundLimitText },
+            unattendedPassthrough,
+            queueFlavorNames,
+          ),
+        };
+      } catch (error) {
+        firstPlanningFailure ??= error;
+        return { value, planningError: error instanceof Error ? error.message : String(error) };
+      }
+    });
+    if (!queueItems.some((item) => "plan" in item)) {
+      throw firstPlanningFailure instanceof Error
+        ? firstPlanningFailure
+        : new Error(String(firstPlanningFailure));
+    }
     if (parsedArguments.switches.has("print")) {
-      console.log(queueItems.map((item) => renderCommandLine(item.plan)).join("\n"));
+      console.log(
+        queueItems
+          .map((item) =>
+            "plan" in item
+              ? renderCommandLine(item.plan)
+              : `# j5: ${queueChoice.parameterName} ${item.value} cannot be run: ${item.planningError}`,
+          )
+          .join("\n"),
+      );
       return EXIT_CODE_SUCCESS;
     }
-    const queueDescription = `${team.name} ${entryPointName}, unattended, ${queueChoice.parameterName} ${queueValues.join(", ")}; ${roundLimitText}`;
+    // Only a queue whose preamble talks about fix rounds has a round limit worth reporting.
+    const roundLimitSuffix = queueDefinition.preamble.includes(`{${QUEUE_PLACEHOLDERS.roundLimit}}`)
+      ? `; ${roundLimitText}`
+      : "";
+    const queueDescription = `${team.name} ${entryPointName}, unattended, ${queueChoice.parameterName} ${queueValues.join(", ")}${roundLimitSuffix}`;
     if (interaction.askedAnything) {
       showNote(queueDescription, "About to run a queue");
       if (!(await askToConfirm("Launch?"))) {

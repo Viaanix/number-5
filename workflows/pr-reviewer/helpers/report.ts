@@ -3,6 +3,7 @@
 // everyone with access to the repository, so these checks run before anything is posted.
 
 import { findCredentialShape } from "#launcher/credential-shapes.ts";
+import { reviewedHeadOfComment } from "#launcher/review-status.ts";
 import { HelperUsageError } from "#launcher/team-helper.ts";
 
 import { OBJECT_ID } from "./snapshot.ts";
@@ -11,7 +12,8 @@ import { OBJECT_ID } from "./snapshot.ts";
 export const MAX_COMMENT_CHARACTERS = 30_000;
 
 const REPORT_HEADER = /^VERDICT: (?:Ship it|Approve-with-nits|Needs work)\r?\n/;
-const REVIEWED_HEAD_LINE = /^Reviewed head SHA: (\S+)\s*$/m;
+// The stamp line is shared (launcher/src/review-status.ts) with the queue that selects pull requests
+// by it, so the line posted here is exactly the one that marks a pull request reviewed.
 
 // The credential shapes are shared (launcher/src/credential-shapes.ts) with the other teams that
 // post model-written text.
@@ -32,7 +34,7 @@ export function requirePostableReport(report: string): string {
       "only a finished review report is posted: it must start with a 'VERDICT: Ship it | Approve-with-nits | Needs work' line. A BLOCKED result is never posted. Nothing was posted.",
     );
   }
-  const reviewedHead = REVIEWED_HEAD_LINE.exec(report)?.[1];
+  const reviewedHead = reviewedHeadOfComment(report);
   if (reviewedHead === undefined || !OBJECT_ID.safeParse(reviewedHead).success) {
     throw new Error(
       "the report must contain a 'Reviewed head SHA: <full commit ID>' line. Nothing was posted.",

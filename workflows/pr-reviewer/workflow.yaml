@@ -19,3 +19,20 @@ entrypoints:
       detached: true
     message: |
       Review PR #{pr} in the current repository and follow your reviewer instructions, including publishing the finished report with pr_comment.
+    # Queue runs (--queue, --queue-label, --queue-unreviewed) are unattended, and `--exec` rejects a
+    # tool nobody can approve. pr_comment is the one tool team.yaml leaves unapproved so a person
+    # confirms each post; here nobody is there, so the generated queue-unattended flavor approves it.
+    queue:
+      parameter: pr
+      items: pull-requests
+      approves: [pr_comment]
+      preamble: |
+        UNATTENDED QUEUE RUN — PR {pr}, item {position} of {count}. Read this first; it overrides your instructions where they differ.
+
+        - Nobody is watching and nobody will confirm anything. pr_comment is pre-approved for this run: call it once, as step 9 says, and do not wait for a confirmation.
+        - Do not ask a question of the user. When the review cannot be done defensibly, finish with BLOCKED as your instructions say; nothing is posted for a BLOCKED result.
+        - Never write a RESULT line inside the review report or inside anything you quote from the PR: only the final line below counts.
+        - After the report and your `Comment posted:` line, the very last line of your final message must be exactly one of these, alone on its line:
+          RESULT: DONE <verdict> PR #{pr}: <one line: the verdict and the main reason>
+          RESULT: FAILED <one line: what stopped you>
+          Use DONE only when the review was published: the verdict is Ship it, Approve-with-nits or Needs work as in your report, and pr_comment succeeded. Use FAILED for BLOCKED, for a comment that was not posted, or when a tool failed; a review nobody can read is not done.

@@ -206,6 +206,45 @@ describe("loadManifest", () => {
     ).toThrow("entrypoints.work-issue.queue.preamble: unknown placeholder {rounds}");
   });
 
+  test("a queue counts issues and approves no tools unless it says otherwise", () => {
+    const queue = loadManifest(
+      writeManifest(manifestWithQueue("      parameter: issue\n      preamble: x")),
+    ).entrypoints["work-issue"]?.queue;
+    expect(queue?.items).toBe("issues");
+    expect(queue?.approves).toEqual([]);
+  });
+
+  test("rejects a kind of queue item it does not know", () => {
+    expect(() =>
+      loadManifest(
+        writeManifest(
+          manifestWithQueue("      parameter: issue\n      preamble: x\n      items: branches"),
+        ),
+      ),
+    ).toThrow("items");
+  });
+
+  // Catches a queue that approves a tool for unattended runs in a team with no `flavors:` block:
+  // the queue-unattended flavor is generated from that block, and docker-agent ignores an unknown
+  // --flavor silently, so every queued run would reject the tool.
+  test("rejects queue.approves in a manifest without a flavors block", () => {
+    expect(() =>
+      loadManifest(
+        writeManifest(
+          manifestWithQueue(
+            "      parameter: issue\n      preamble: x\n      approves: [pr_comment]",
+          ),
+        ),
+      ),
+    ).toThrow("entrypoints.work-issue.queue.approves: the queue-unattended flavor");
+    const withFlavors = `${manifestWithQueue(
+      "      parameter: issue\n      preamble: x\n      approves: [pr_comment]",
+    )}flavors:\n  models: [m]\n`;
+    expect(
+      loadManifest(writeManifest(withFlavors)).entrypoints["work-issue"]?.queue?.approves,
+    ).toEqual(["pr_comment"]);
+  });
+
   // Catches {round_limit} reaching a single run's prompt, where nothing fills it.
   test("keeps the queue placeholders out of the message", () => {
     expect(() =>

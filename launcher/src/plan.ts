@@ -210,6 +210,24 @@ function buildPreparationSteps(
   return [fetchStep, addStep];
 }
 
+// A kept detached review snapshot is moved to the PR's current head. A snapshot exists to be the
+// PR's head, so reusing it as it was left made a PR that gained a commit fail its next review
+// ("checkout HEAD is stale") until someone deleted the directory. FETCH_HEAD is per worktree, so
+// the fetch runs inside the worktree, where the checkout reads it.
+function buildSnapshotRefreshSteps(request: LaunchRequest, location: WorktreeLocation): string[][] {
+  const pullRequestBranch = request.worktree?.pullRequestBranch;
+  if (pullRequestBranch === undefined) {
+    throw new Error(
+      `entry point '${request.entryPointName}' needs the PR's branch to refresh its review worktree`,
+    );
+  }
+  const gitInWorktree = ["git", "-C", location.path];
+  return [
+    [...gitInWorktree, "fetch", ORIGIN_REMOTE_NAME, pullRequestBranch.name],
+    [...gitInWorktree, "checkout", "--detach", "FETCH_HEAD"],
+  ];
+}
+
 /**
  * Builds the worktree preparation steps and the docker-agent invocation for one entry point.
  * @throws Error when the request is inconsistent with the entry point's worktree mode,
@@ -258,8 +276,14 @@ export function buildLaunchPlan(request: LaunchRequest): LaunchPlan {
     }
     if (worktreeState.kind === "absent") {
       preparationSteps = buildPreparationSteps(request, entryPoint, location);
+    } else if (
+      worktreeState.kind === "reusable" &&
+      entryPoint.worktree.mode === "pr" &&
+      entryPoint.worktree.detached === true
+    ) {
+      preparationSteps = buildSnapshotRefreshSteps(request, location);
     }
-    // A reusable worktree is continued as it is: no fetch, no reset.
+    // Any other reusable worktree is continued as it is: no fetch, no reset.
     workingDirectory = location.path;
     commandWords.push("--working-dir", location.path);
   }

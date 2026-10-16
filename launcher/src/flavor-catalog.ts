@@ -11,6 +11,8 @@
 //   effort-<level>     --effort <level> sets reasoning_effort on the tunable models and the reviewer's
 //   reviewer-on-<tier> j5 adds it itself to keep the reviewer off the builders' tier
 //                      (launcher/src/independence.ts); never a user choice
+//   queue-unattended   j5 adds it itself to every queue run of an entry point whose `queue.approves`
+//                      lists tools; it approves them on top of team.yaml's `permissions.allow`
 // Model and effort flavors patch different keys, so they combine in either order.
 
 import { readFileSync } from "node:fs";
@@ -23,6 +25,7 @@ import type { WorkflowManifest } from "./manifest.ts";
 
 export const MODEL_FLAVOR_PREFIX = "model-";
 export const EFFORT_FLAVOR_PREFIX = "effort-";
+export const QUEUE_FLAVOR_NAME = "queue-unattended";
 
 const BEGIN_MARKER = "# BEGIN GENERATED FLAVORS";
 const END_MARKER = "# END GENERATED FLAVORS";
@@ -46,12 +49,23 @@ export type TeamTuning = {
   tunableModels: string[];
   /** The named models of the independence reviewer; they follow --effort, never --model. */
   reviewerModels: string[];
+  /**
+   * The tools a queue run approves (the union of the entry points' `queue.approves`) and the
+   * tools team.yaml already approves. Absent when no entry point approves anything.
+   */
+  queueApproval?: { approvedTools: string[]; alreadyAllowedTools: string[] };
 };
 
 type ModelPatch = { model?: string; provider_opts?: { extra_body: { reasoning_effort: string } } };
 
-/** One flavor: a patch over `models:`. */
-export type FlavorPatch = { models: Record<string, ModelPatch> };
+/**
+ * One flavor: a patch over `models:`, or over `permissions:`. A list in a flavor replaces the
+ * base list (gotchas.md), so a permissions flavor carries the whole allow list.
+ */
+export type FlavorPatch = {
+  models?: Record<string, ModelPatch>;
+  permissions?: { allow: string[] };
+};
 
 /** Reads and checks the catalog: every tier is a known tier and its model id classifies to it. */
 export function loadFlavorCatalog(catalogPath: string): FlavorCatalog {
@@ -88,8 +102,9 @@ function modelsOnTier(modelNames: string[], modelId: string): FlavorPatch {
 }
 
 /**
- * Every flavor a team gets, in file order: its model flavors, its effort flavors, and (when it
- * has an independence reviewer) a reviewer flavor per tier.
+ * Every flavor a team gets, in file order: its model flavors, its effort flavors, (when it has an
+ * independence reviewer) a reviewer flavor per tier, and (when a queue approves tools) the
+ * queue flavor.
  */
 export function buildFlavors(
   catalog: FlavorCatalog,
@@ -115,6 +130,12 @@ export function buildFlavors(
       flavors[`${REVIEWER_FLAVOR_PREFIX}${tier}`] = modelsOnTier(tuning.reviewerModels, modelId);
     }
   }
+  if (tuning.queueApproval !== undefined) {
+    const { approvedTools, alreadyAllowedTools } = tuning.queueApproval;
+    flavors[QUEUE_FLAVOR_NAME] = {
+      permissions: { allow: [...alreadyAllowedTools, ...approvedTools] },
+    };
+  }
   return flavors;
 }
 
@@ -126,18 +147,27 @@ export function renderGeneratedSection(flavors: Record<string, FlavorPatch>): st
     "flavors:",
   ];
   for (const [flavorName, patch] of Object.entries(flavors)) {
-    lines.push(`  ${flavorName}:`, "    models:");
-    for (const [modelName, modelPatch] of Object.entries(patch.models)) {
-      lines.push(`      ${modelName}:`);
-      if (modelPatch.model !== undefined) {
-        lines.push(`        model: ${modelPatch.model}`);
+    lines.push(`  ${flavorName}:`);
+    if (patch.permissions !== undefined) {
+      lines.push("    permissions:", "      allow:");
+      for (const toolName of patch.permissions.allow) {
+        lines.push(`        - ${toolName}`);
       }
-      if (modelPatch.provider_opts !== undefined) {
-        lines.push(
-          "        provider_opts:",
-          "          extra_body:",
-          `            reasoning_effort: ${modelPatch.provider_opts.extra_body.reasoning_effort}`,
-        );
+    }
+    if (patch.models !== undefined) {
+      lines.push("    models:");
+      for (const [modelName, modelPatch] of Object.entries(patch.models)) {
+        lines.push(`      ${modelName}:`);
+        if (modelPatch.model !== undefined) {
+          lines.push(`        model: ${modelPatch.model}`);
+        }
+        if (modelPatch.provider_opts !== undefined) {
+          lines.push(
+            "        provider_opts:",
+            "          extra_body:",
+            `            reasoning_effort: ${modelPatch.provider_opts.extra_body.reasoning_effort}`,
+          );
+        }
       }
     }
   }
@@ -166,17 +196,21 @@ export function replaceGeneratedSection(teamYamlText: string, section: string): 
 const teamDocumentSchema = z.object({
   agents: z.record(z.string(), z.looseObject({ model: z.string().optional() })),
   models: z.record(z.string(), z.unknown()).default({}),
+  permissions: z.looseObject({ allow: z.array(z.string()).default([]) }).optional(),
 });
 
 /**
  * Works out a team's tuning from its workflow.yaml block and team.yaml: the reviewer's models are
- * those of the independence reviewer agent. Returns the problems found instead when the manifest
- * and team.yaml disagree (a tunable name that is no model, a reviewer with no named model).
+ * those of the independence reviewer agent, and `approvedTools` (what its queues approve) become
+ * the queue flavor's additions to team.yaml's own allow list. Returns the problems found instead
+ * when the manifest and team.yaml disagree (a tunable name that is no model, a reviewer with no
+ * named model, an approved tool that is already approved or has no allow list to extend).
  */
 export function resolveTuning(
   tunableModels: string[],
   independenceReviewer: string | undefined,
   teamYamlText: string,
+  approvedTools: string[] = [],
 ): { tuning: TeamTuning; problems: string[] } {
   const parsed = teamDocumentSchema.safeParse(Bun.YAML.parse(teamYamlText));
   const problems: string[] = [];
@@ -207,11 +241,38 @@ export function resolveTuning(
       reviewerModels.push(reviewerModelName);
     }
   }
-  return { tuning: { tunableModels, reviewerModels }, problems };
+  let queueApproval: TeamTuning["queueApproval"];
+  if (approvedTools.length > 0) {
+    const alreadyAllowedTools = parsed.data.permissions?.allow ?? [];
+    if (parsed.data.permissions === undefined) {
+      problems.push(
+        `queue.approves: team.yaml has no permissions.allow list to extend; without one the queue flavor would approve only ${approvedTools.join(", ")} and ask for every other tool`,
+      );
+    }
+    for (const toolName of approvedTools) {
+      if (alreadyAllowedTools.includes(toolName)) {
+        problems.push(
+          `queue.approves: '${toolName}' is already in permissions.allow, so interactive runs would not ask either; remove it from one of them`,
+        );
+      }
+    }
+    queueApproval = { approvedTools, alreadyAllowedTools };
+  }
+  return {
+    tuning: { tunableModels, reviewerModels, ...(queueApproval && { queueApproval }) },
+    problems,
+  };
 }
 
 /** File name of the catalog, directly under workflows/ next to the team directories. */
 export const FLAVOR_CATALOG_FILE_NAME = "flavors.yaml";
+
+/** Every tool the team's queue entry points approve for unattended runs, without repeats. */
+export function queueApprovedTools(team: WorkflowManifest): string[] {
+  return [
+    ...new Set(Object.values(team.entrypoints).flatMap((entry) => entry.queue?.approves ?? [])),
+  ];
+}
 
 /**
  * The generated block a team's team.yaml should hold, from the catalog and its workflow.yaml.
@@ -224,10 +285,12 @@ export function planTeamFlavors(
   if (team.flavors === undefined) {
     return { section: undefined, problems: [] };
   }
+  const approvedTools = queueApprovedTools(team);
   const { tuning, problems } = resolveTuning(
     team.flavors.models,
     team.independence?.reviewer,
     readFileSync(team.teamConfigPath, "utf8"),
+    approvedTools,
   );
   if (problems.length > 0) {
     return { section: undefined, problems };

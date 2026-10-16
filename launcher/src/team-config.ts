@@ -10,12 +10,13 @@
 // The flavor names are a contract (launcher/src/flavor-catalog.ts): `model-<tier>` and
 // `effort-<level>` are the user's choices, `reviewer-on-<tier>` is j5's own, to keep a reviewer
 // independent of the builder (launcher/src/independence.ts), and is never offered to the user.
+// `queue-unattended` is j5's too: it is added to queue runs of an entry point that approves tools.
 
 import { readFileSync } from "node:fs";
 
 import { z } from "zod";
 
-import { EFFORT_FLAVOR_PREFIX, MODEL_FLAVOR_PREFIX } from "./flavor-catalog.ts";
+import { EFFORT_FLAVOR_PREFIX, MODEL_FLAVOR_PREFIX, QUEUE_FLAVOR_NAME } from "./flavor-catalog.ts";
 import { isReviewerFlavorName } from "./independence.ts";
 
 const teamConfigSchema = z.object({
@@ -62,6 +63,7 @@ export function readTeamConfigSummary(teamConfigPath: string): TeamConfigSummary
       (flavorName) =>
         !flavorName.startsWith(MODEL_FLAVOR_PREFIX) &&
         !flavorName.startsWith(EFFORT_FLAVOR_PREFIX) &&
+        flavorName !== QUEUE_FLAVOR_NAME &&
         !isReviewerFlavorName(flavorName),
     ),
   };
