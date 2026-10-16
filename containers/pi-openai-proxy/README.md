@@ -162,13 +162,27 @@ the fork's own, so nothing changes until one is set:
 |---|---|---|
 | `PI_PROXY_LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warning`, `error` or `fatal`. An invalid value is ignored with a warning. Checked: `debug` adds debug lines. |
 | `PI_PROXY_LOG_FORMAT` | `json` | `pretty` prints local-time lines for reading `docker compose logs` by eye. Checked with `pretty`. |
-| `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` | Ceiling on one upstream request; the fork's config allows 5 to 600 seconds. **Not verified that the container honors it.** |
+| `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` | A hard ceiling on one whole upstream request, in milliseconds; the fork's config allows 5 to 600 seconds. Checked: the container honors it. |
 
-**A possible limit for long turns (from reading the fork's source, not tested).** The timeout is an
-`AbortSignal.timeout` around the whole upstream call, not an idle timeout, so a single response that
-takes longer than the ceiling is cut off, whether or not it is still streaming. A high-effort Opus
-turn with a large `max_tokens` can plausibly run that long. No request that long was sent here. If
-agent turns fail at about two minutes, raise the setting (600000 is the maximum).
+**The timeout counts wall-clock time, not silence (measured 2026-10-16, image `4.9.6-2`).** It is an
+`AbortSignal.timeout` created when the request starts; it never resets. With the setting at its 5 s
+minimum, on the same prompts:
+
+| Request | Result at 5 s |
+|---|---|
+| Haiku, ~1,000-word essay, not streamed | HTTP 502 `Upstream provider error`, nothing returned |
+| Haiku, same, streamed | Text was arriving (223 chunks, first at 0.5 s); cut at 5.0 s with HTTP 200 already sent, then an error event `This operation was aborted` (`upstream_error`) and `[DONE]` |
+| Opus 5.5 at `xhigh`, a reasoning puzzle, not streamed | HTTP 502 at 5.0 s |
+| Same, streamed | No content chunk ever arrived (the model was thinking); the same error event at 5.0 s |
+
+So thinking time, a silent wait and active streaming all count. With the default 120 s the same
+requests completed: the essay in 10.5 s, and the Opus `xhigh` puzzle in 69.4 s (66.4 s streamed),
+having spent all 8,000 `max_tokens` on thinking with no visible text. That is about 115 tokens a
+second, so 120 s is roughly 14,000 tokens of one response at that rate. The teams set `max_tokens`
+to 16,384 or 32,768, and 32,768 tokens would take about 280 s. A single turn that uses most of its
+budget, a deep `xhigh` reasoning step or a large file written in one call, would be cut off at the
+default. Not tested: a real agent turn that long, and what Docker Agent does with the in-stream
+error event. The maximum is 600000 (10 minutes).
 
 The healthcheck is `GET /healthz`, which needs no token and says the process listens and Pi's model
 runtime loaded. It does not say a login exists (`j5 setup --check` asks `/v1/models` for that).
@@ -420,8 +434,7 @@ token survives is only known at the next refresh. Test against an empty volume, 
 login's `expires` first and stop if it is within a day.
 
 Not verified: this image on the live proxy (still on `4.9.6-1`, Bun); completing a login or a token
-refresh under Node; Docker Agent teams against it; long turns against the upstream timeout; the
-arm64 build (CI builds it).
+refresh under Node; Docker Agent teams against it; the arm64 build (CI builds it).
 
 ### Pi 1.x image (`4.9.6-1`), 2026-10-16
 
