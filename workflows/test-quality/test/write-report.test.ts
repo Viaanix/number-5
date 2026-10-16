@@ -3,7 +3,14 @@
 // the helper the way a docker-agent script tool does, with the report in the environment.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
@@ -83,7 +90,10 @@ describe("test-quality-write-report", () => {
     const result = runWriteReport(projectRoot, "# Audit\nS1 finding\n");
     expect(result.exitCode).toBe(0);
     const writtenPath = result.standardOutput.trim();
-    expect(writtenPath.startsWith(join(projectRoot, ".j5", "review"))).toBe(true);
+    // The helper prints the path of its real working directory; macOS temporary directories sit
+    // behind a symlink (/var -> /private/var), so compare against the canonical form.
+    const canonicalProjectRoot = realpathSync.native(projectRoot);
+    expect(writtenPath.startsWith(join(canonicalProjectRoot, ".j5", "review"))).toBe(true);
     expect(writtenPath).toMatch(TODAY_PATTERN);
     expect(readFileSync(writtenPath, "utf8")).toBe("# Audit\nS1 finding\n");
   });
