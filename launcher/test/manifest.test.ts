@@ -313,7 +313,21 @@ describe("readTeamConfigSummary", () => {
     expect(readTeamConfigSummary(join(manifestPath, "..", "team.yaml"))).toEqual({
       agentNames: ["root"],
       flavorNames: ["max", "low"],
+      reviewerFlavorNames: [],
     });
+  });
+
+  // Catches the reviewer's flavors showing up as efforts: `--effort reviewer-on-opus` would then
+  // be accepted, and the prompt and `j5 list` would offer a choice the user must never make.
+  test("keeps the reviewer-on-<tier> flavors out of the efforts", () => {
+    const manifestPath = writeTeamFixture(
+      createTemporaryDirectory(),
+      VALID_MANIFEST_YAML,
+      buildTeamYaml(["low", "reviewer-on-opus", "reviewer-on-sonnet"]),
+    );
+    const summary = readTeamConfigSummary(join(manifestPath, "..", "team.yaml"));
+    expect(summary.flavorNames).toEqual(["low"]);
+    expect(summary.reviewerFlavorNames).toEqual(["reviewer-on-opus", "reviewer-on-sonnet"]);
   });
 
   test("reports no flavors for a team without a flavors section", () => {

@@ -9,6 +9,12 @@ description: GitHub issue → pull request (a draft when the review or verificat
 team: team.yaml
 # The typed tools in team.yaml call these helpers by name.
 path: [bin]
+# The reviewer must not be the same model class as the agents whose work it reviews. j5 picks
+# its tier from theirs, one step up (down from the top tier), with a reviewer-on-<tier> flavor
+# from team.yaml, and refuses to launch if it cannot. Rule: launcher/src/independence.ts.
+independence:
+  reviewer: reviewer
+  reviews: [builder, tester]
 
 entrypoints:
   work-issue:
