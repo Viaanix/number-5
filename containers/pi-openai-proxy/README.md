@@ -122,6 +122,24 @@ Pi stores its login in the Compose-managed `pi-auth` volume, mounted at
 can persist. The host's `~/.pi/agent` is never mounted. Stop a running proxy before
 using this login command again.
 
+**An empty `models.json` in an older volume.** Before the Pi 1.x image, Compose mounted this
+repository's `models.json` into that directory, which left a root-owned, 0-byte `models.json` in
+the volume. The Pi 1.x image mounts nothing there, so on such a volume the proxy logs
+`[warn] models.json load error: Failed to parse models.json: JSON Parse error: Unexpected EOF`
+and continues with the built-in catalogue (17 models for the login it was tried with; nothing
+else breaks). To silence it, stop the proxy and delete the empty file, then start it again:
+
+```bash
+docker compose stop proxy
+docker run --rm --user root -v j5-pi-openai-proxy_pi-auth:/v --entrypoint sh \
+  ghcr.io/viaanix/j5-pi-openai-proxy:4.9.6-1 -c 'test ! -s /v/models.json && rm -f /v/models.json'
+docker compose up --wait
+```
+
+The `test ! -s` guard deletes the file only when it is empty, so a `models.json` you wrote
+yourself is kept. Seen and fixed on 2026-10-16 on the volume this was written from; a new volume
+never has the file.
+
 ## Start and inspect
 
 In the same directory and with the local bearer secret exported:
