@@ -203,7 +203,7 @@ token counter accumulating in the Docker Agent sidebar.
 
 Treat `@victor-software-house/pi-openai-proxy` as abandoned: 4.9.5 is the latest release (published 2026-05-06), the repository's last push was 2026-06-08, and there is no open issue about what we patch. We keep it pinned and carry small build-time patches (`patch-usage.ts`), each of which fails the build if the package stops matching.
 
-A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy). Its [PR #1](https://github.com/vx-daniel/pi-openai-proxy/pull/1) ports the proxy to Pi 1.x (`ModelRuntime` replaces `AuthStorage` and `ModelRegistry.create()`) and fixes `prompt_tokens` at source, which replaces `patch-usage.ts`. **This image does not use it yet**: it still installs 4.9.5 from npm, and switching means publishing the fork and re-testing the live login under Pi 1.x.
+A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-openai-proxy). Its [PR #1](https://github.com/vx-daniel/pi-openai-proxy/pull/1), merged 2026-10-16, ports the proxy to Pi 1.x (`ModelRuntime` replaces `AuthStorage` and `ModelRegistry.create()`) and fixes `prompt_tokens` at source, which replaces `patch-usage.ts`. **This image does not use it yet**: it still installs 4.9.5 from npm, and switching means publishing the fork, re-testing the live login under Pi 1.x, and trimming `models.json` (see the note under the table).
 
 **Why Pi's version decides which models work.** The Opus 5.5 rejection comes from the client version Pi's Anthropic client sends (`user-agent: claude-cli/<version>`), not from this proxy. Read from the published `@earendil-works/pi-ai` packages (`claudeCodeVersion` in `dist`), checked 2026-10-16:
 
@@ -214,6 +214,8 @@ A fork exists at [`vx-daniel/pi-openai-proxy`](https://github.com/vx-daniel/pi-o
 | 1.0.0 to 1.3.0 (1.0.0, 1.1.0, 1.2.0, 1.3.0 read) | 2.1.280 | Opus 5.5 and Fable 5.1 answered through a container built from the fork's Pi 1.x branch, 2026-10-16 |
 
 Releases between the ones listed were not read. Anthropic's errors named 2.1.280 for Opus 5.5 and 2.1.251 for Fable 5.1 ([gotcha](../../docs/docker-agent/gotchas.md#opus-55-is-rejected-for-the-pi-proxys-subscription-login)).
+
+**Those probe requests used our hand-written `models.json` entries**, which replace Pi's built-in definitions and send the legacy token-budget form of thinking instead of adaptive effort. Pi 1.x already knows `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1`, so the image should stop listing them when it moves to Pi 1.x. The request bodies each setup sends are in the gotchas, in the entry about `models.json` added with the `--model`/`--effort` flavors.
 
 ### Other forks reviewed (2026-10-16)
 
