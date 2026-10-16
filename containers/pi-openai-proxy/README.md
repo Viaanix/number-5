@@ -148,21 +148,31 @@ never has the file.
 ## Logs and settings
 
 The fork logs with LogTape, one JSON object per line on stderr when there is no terminal, which is
-always the case in a container: `@timestamp`, `level`, `message`, `logger`, `properties`. Each chat
+the case for a container started by Compose: `@timestamp`, `level`, `message`, `logger`, `properties`. Each chat
 request logs `Chat request for "<requested>" resolved to "<provider>/<model>"` at `info`
 (logger `pi-openai-proxy.server.chat`; properties include `requestId`, `clientRequestId` and
 `stream`), which replaces the `chat_request` line of the earlier images. Checked 2026-10-16: a
 distinctive phrase sent in a prompt appeared 0 times in the logs.
 
-Compose passes three settings through, so they can be set in `~/.config/cagent/.env` (the file
-`j5 setup --proxy` hands to Compose; a plain `docker compose up` does not read it). Each default is
-the fork's own, so nothing changes until one is set:
+Compose passes four settings through **only when they are set**, in the shell or in
+`~/.config/cagent/.env` next to the token. Nothing is set by default, so the fork's own defaults
+apply. They are bare keys in `compose.yaml` on purpose: a default written there would always set the
+variable, and in the fork an environment variable beats `proxy-config.json`, so `logLevel` and
+`upstreamTimeoutSec` in that file could never take effect. Checked with `docker compose run … env`:
+a variable set in the env file reaches the container, and one that is not set is absent (not an
+empty string, which the fork would warn about at every start).
 
-| Variable | Default here | Effect |
+| Variable | Unset means | Effect |
 |---|---|---|
 | `PI_PROXY_LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warning`, `error` or `fatal`. An invalid value is ignored with a warning. Checked: `debug` adds debug lines. |
-| `PI_PROXY_LOG_FORMAT` | `json` | `pretty` prints local-time lines for reading `docker compose logs` by eye. Checked with `pretty`. |
-| `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` | A hard ceiling on one whole upstream request, in milliseconds; the fork's config allows 5 to 600 seconds. Checked: the container honors it. |
+| `PI_PROXY_LOG_FORMAT` | JSON lines (the fork's default without a terminal) | `pretty` prints lines for reading `docker compose logs` by eye. Checked with `pretty`. |
+| `PI_PROXY_UPSTREAM_TIMEOUT_MS` | 120000 | A hard ceiling on one whole upstream request, in milliseconds; the fork's config allows 5 to 600 seconds (600000 is the maximum). Checked: the container honors it. |
+| `TZ` | UTC | The time zone `pretty` logs print in, for example `TZ=America/Chicago`. Checked: `new Date()` in the image reports Central time with it set and UTC without. JSON lines keep a UTC `@timestamp` either way. |
+
+`j5 setup` hands `~/.config/cagent/.env` to Compose only when the token comes from that file. If you
+export the token in your shell instead, export these there too. docker-agent also loads that file,
+so a `TZ` there may reach its tools as well (not checked); set it in the shell instead if you only
+want it for the proxy.
 
 **The timeout counts wall-clock time, not silence (measured 2026-10-16, image `4.9.6-2`).** It is an
 `AbortSignal.timeout` created when the request starts; it never resets. With the setting at its 5 s

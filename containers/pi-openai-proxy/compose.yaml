@@ -19,14 +19,18 @@ services:
       # It is read at request time, so no image rebuild or tag bump is needed. Remove the line to
       # go back to the 5-minute default.
       PI_CACHE_RETENTION: long
-      # The fork's logging and request-time limit, passed through so they can be set in the same
-      # file as the token (~/.config/cagent/.env, which `j5 setup --proxy` hands to Compose)
-      # without editing this one. Each default is the fork's own, so nothing changes until one is
-      # set: `info`, JSON lines (a container has no terminal, and `pretty` is for reading
-      # `docker compose logs` by eye), and a 120 s ceiling on one upstream request.
-      PI_PROXY_LOG_LEVEL: "${PI_PROXY_LOG_LEVEL:-info}"
-      PI_PROXY_LOG_FORMAT: "${PI_PROXY_LOG_FORMAT:-json}"
-      PI_PROXY_UPSTREAM_TIMEOUT_MS: "${PI_PROXY_UPSTREAM_TIMEOUT_MS:-120000}"
+      # The fork's logging, request-time limit and time zone, passed through only when set, in the
+      # shell or in the file `j5 setup --proxy` hands to Compose (~/.config/cagent/.env, next to
+      # the token). They are bare keys on purpose: Compose leaves a bare key out of the container
+      # when nothing sets it. A default written here would always set the variable, and in the fork
+      # an environment variable beats `proxy-config.json`, so `logLevel` and `upstreamTimeoutSec`
+      # in that file could never take effect. With nothing set the fork uses its own defaults:
+      # `info`, JSON lines when there is no terminal, a 120 s ceiling on one whole upstream
+      # request, and UTC (set TZ for local time in `pretty` logs).
+      PI_PROXY_LOG_LEVEL:
+      PI_PROXY_LOG_FORMAT:
+      PI_PROXY_UPSTREAM_TIMEOUT_MS:
+      TZ:
     ports:
       - "127.0.0.1:${PI_PROXY_PORT:-4141}:4141"
     volumes:
