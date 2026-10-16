@@ -1,0 +1,28 @@
+# The standard flavors every team offers, defined once. `bun run flavors` writes them into each
+# team's team.yaml (the block between the BEGIN/END GENERATED FLAVORS markers) from this file and
+# the `flavors:` block of the team's workflow.yaml. See launcher/src/flavor-catalog.ts.
+#
+#   j5 <team> <entrypoint> --model <tier> --effort <level>
+#
+# After changing this file run `bun run flavors`; `bun run validate:teams` fails while a team.yaml
+# is out of date.
+
+# Tier name -> the model id that tier means for every team. The tier name must appear in the id
+# (haiku, sonnet, opus, fable), which `bun run flavors` checks. j5 uses the tiers to keep a
+# reviewer off the builders' model class, one step up the ladder haiku < sonnet < opus < fable.
+#
+# Opus 5.5 and Fable 5.1 are not here: the proxy's Claude login is rejected for them
+# (docs/docker-agent/gotchas.md). Add a tier here once a model for it works.
+tiers:
+  haiku: claude-haiku-5-5
+  sonnet: claude-sonnet-5-5
+  opus: claude-opus-4-7
+
+# Reasoning efforts, spelled as the proxy takes them. The proxy accepted low, medium, high and
+# xhigh on all three tiers above and rejected max (2026-10-15, one request per combination).
+# Accepted is not the same as different: that a level changes the model's behavior is not tested.
+efforts:
+  - low
+  - medium
+  - high
+  - xhigh

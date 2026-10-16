@@ -3,11 +3,17 @@
 // (launcher/src/team-models.ts). Without it, launching issue-team under a stand-in docker would
 // fail before reaching the stand-in's own behavior.
 //
-// The answer reflects the flavors in the arguments the way issue-team's team.yaml defines them:
-// `low` puts the builders on Haiku, and `reviewer-on-<tier>` puts the reviewer on that tier.
+// The answer reflects the flavors in the arguments the way the generated flavors of issue-team's
+// team.yaml define them: `model-<tier>` puts the builders on that tier, and `reviewer-on-<tier>`
+// puts the reviewer on it. `effort-<level>` changes no model id, so it is not listed here.
 
-const BUILDER_MODEL_BY_FLAVOR: Record<string, string> = { low: "claude-haiku-5-5" };
+const BUILDER_MODEL_BY_FLAVOR: Record<string, string> = {
+  "model-haiku": "claude-haiku-5-5",
+  "model-sonnet": "claude-sonnet-5-5",
+  "model-opus": "claude-opus-4-7",
+};
 const REVIEWER_MODEL_BY_FLAVOR: Record<string, string> = {
+  "reviewer-on-haiku": "claude-haiku-5-5",
   "reviewer-on-sonnet": "claude-sonnet-5-5",
   "reviewer-on-opus": "claude-opus-4-7",
 };

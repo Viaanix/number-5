@@ -1,6 +1,6 @@
 // The launch-time step of the independence rule: from the models the builders run on (after the
-// effort the user chose), pick the reviewer's tier, add the flavor that puts the reviewer on it,
-// and check the result before anything is launched.
+// flavors the user chose with --model and --effort), pick the reviewer's tier, add the flavor
+// that puts the reviewer on it, and check the result before anything is launched.
 //
 // Why a flavor and not `docker agent run --model reviewer=...`: the flavor is a patch of the
 // reviewer's named model in team.yaml, so its settings (the reasoning effort the Claude models
@@ -21,7 +21,7 @@ import { type DockerAgentRunner, resolveAgentModels } from "./team-models.ts";
 // docker-agent flags that change which model an agent uses, and so could break the rule unseen.
 const MODEL_CHANGING_FLAGS = ["--model", "--flavor"];
 
-/** The flavors j5 adds on top of the user's effort, and a line saying why. */
+/** The flavors j5 adds on top of the user's, and a line saying why. */
 export type AutomaticFlavors = { flavorNames: string[]; explanation: string | undefined };
 
 const NO_AUTOMATIC_FLAVORS: AutomaticFlavors = { flavorNames: [], explanation: undefined };
@@ -39,7 +39,7 @@ function rejectConflictingPassthrough(passthroughArguments: string[], teamName: 
   const conflicting = passthroughArguments.find((argument) => isModelChangingFlag(argument));
   if (conflicting !== undefined) {
     throw new IndependenceError(
-      `${conflicting} after '--' would change the models ${teamName} keeps independent; choose an effort with --effort, or edit team.yaml`,
+      `${conflicting} after '--' would change the models ${teamName} keeps independent; choose them with --model and --effort, or edit team.yaml`,
     );
   }
 }
@@ -60,7 +60,7 @@ export function offeredReviewerTiers(teamConfigPath: string): ModelTier[] {
  */
 export function chooseAutomaticFlavors(
   team: WorkflowManifest,
-  effort: string | undefined,
+  userFlavors: string[],
   passthroughArguments: string[],
   runDockerAgent: DockerAgentRunner,
 ): AutomaticFlavors {
@@ -70,13 +70,12 @@ export function chooseAutomaticFlavors(
   }
   rejectConflictingPassthrough(passthroughArguments, team.name);
 
-  const effortFlavors = effort === undefined ? [] : [effort];
-  const beforeReview = resolveAgentModels(team.teamConfigPath, effortFlavors, runDockerAgent);
+  const beforeReview = resolveAgentModels(team.teamConfigPath, userFlavors, runDockerAgent);
   const choice = chooseReviewer(rule, offeredReviewerTiers(team.teamConfigPath), beforeReview);
 
   const afterReview = resolveAgentModels(
     team.teamConfigPath,
-    [...effortFlavors, choice.flavorName],
+    [...userFlavors, choice.flavorName],
     runDockerAgent,
   );
   const problems = findIndependenceProblems(rule, afterReview);

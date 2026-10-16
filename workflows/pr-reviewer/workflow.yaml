@@ -2,6 +2,10 @@ name: pr-reviewer
 description: Native PR review through the local pi provider; returns a report and posts it as one PR comment
 team: team.yaml
 path: [bin]
+# The named models (keys under `models:` in team.yaml) that --model and --effort change. The
+# flavors themselves are generated into team.yaml: `bun run flavors`.
+flavors:
+  models: [reviewer_model]
 
 entrypoints:
   review:

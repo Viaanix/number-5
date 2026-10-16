@@ -24,7 +24,7 @@ docker agent run team.yaml --dry-run --flavor nope "x"   # exit 0 as well
 
 **Consequence:** `--flavor lwo` runs the team at its default settings and nothing tells you.
 
-**Mitigation:** `j5` reads the flavor names from `team.yaml` and rejects anything else (`launcher/src/parameters.ts`, `describeInvalidEffort`). Do the same check in any other wrapper.
+**Mitigation:** `j5` reads the `model-*` and `effort-*` flavor names from `team.yaml` and rejects any other `--model` / `--effort` value (`launcher/src/parameters.ts`, `describeInvalidChoice`). Do the same check in any other wrapper.
 
 ### A flavor that repeats the base values applies without a word
 
@@ -34,7 +34,7 @@ docker agent run team.yaml --dry-run --flavor nope "x"   # exit 0 as well
 
 **Consequence:** a flavor can look meaningful in review and change nothing.
 
-**Mitigation:** `bun run validate:teams` fails any flavor whose resolved config equals the base.
+**Mitigation:** `bun run validate:teams` compares each generated flavor's merged config with what its name promises (`model-opus` puts the tunable models on an Opus model, `effort-high` sets `reasoning_effort: high`), not with the base, because a flavor that is right can equal the base (`effort-high` on a team already at `high`).
 
 What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 - an unknown key: `agent:` instead of `agents:` → `unknown field "agent"`;
@@ -48,6 +48,32 @@ What docker-agent *does* catch in a flavor, both at `debug config` and at `run`:
 **Receipt:** a flavor with `models: { lead: { model: claude-haiku-4-5 } }`, resolved with `docker agent debug config team.yaml --flavor low`, keeps `provider: anthropic` from the base and changes only `model`. With a flavor applied, `debug config` no longer prints the `flavors:` section.
 
 **Consequence:** a flavor only needs the keys it changes. Lists are not checked yet; assume a list in a flavor replaces the base list until someone verifies it.
+
+### A flavor that names a model the team does not have adds an incomplete model, silently
+
+**Observed:** v1.145.0, 2026-10-15.
+
+**Receipt:** a team with `models: { real: {provider: pi, model: claude-sonnet-5-5} }` and a flavor `typo: { models: { rael: { model: claude-haiku-5-5 } } }`: `docker agent debug config team.yaml --flavor typo` exits 0 and prints both `real` and a new `rael` with `model:` and no `provider`; `docker agent run … --flavor typo --dry-run --exec x` exits 0 as well.
+
+**Consequence:** a misspelled model name in a flavor changes nothing and reports nothing; the intended model keeps its base settings.
+
+**Mitigation:** the flavors are generated, and the generator refuses a tunable name that is not a model in `team.yaml` (`launcher/src/flavor-catalog.ts`, `resolveTuning`).
+
+### `--model` and `--effort` flavors patch different keys, so order does not matter
+
+**Observed:** v1.145.0, 2026-10-15, issue-team's generated flavors.
+
+**Receipt:** `docker agent debug config team.yaml --flavor model-haiku --flavor effort-xhigh --flavor reviewer-on-sonnet` and the same with `effort-xhigh` first printed identical models: builders, coordinator and tester on `claude-haiku-5-5` at `reasoning_effort: xhigh`, the reviewer on `claude-sonnet-5-5` at `xhigh`.
+
+**Consequence:** the launcher may pass them in any order; it passes model, effort, then j5's reviewer flavor, because the reviewer flavor must be read after the others to see the builders' tier.
+
+### The proxy takes `reasoning_effort` low, medium, high and xhigh, not max
+
+**Observed:** proxy with pi-openai-proxy 4.9.5, Pi 0.73.0, 2026-10-15.
+
+**Receipt:** one request per combination to `POST /v1/chat/completions` with `max_tokens: 64`, `reasoning_effort: <value>` and the prompt "Reply with the single word OK.", on `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-4-7`: `low`, `medium`, `high` and `xhigh` answered HTTP 200 on all three; `max` answered HTTP 400 `Invalid value for 'reasoning_effort': Invalid option: expected one of "none"|"minimal"|"low"|"medium"|…` on all three.
+
+**Consequence:** `workflows/flavors.yaml` lists `low`, `medium`, `high` and `xhigh`. Accepted is not the same as different: that a level changes a model's behavior was not tested (`none` and `minimal` are accepted spellings too, and not offered).
 
 ## Running and dry runs
 

@@ -1,6 +1,6 @@
 // Command-line parsing for `j5`.
 //
-//   j5 [<team> [<entrypoint>]] [--project PATH] [--base REF] [--effort FLAVOR]
+//   j5 [<team> [<entrypoint>]] [--project PATH] [--base REF] [--model TIER] [--effort LEVEL]
 //       [--queue N,N,... | --queue-label LABEL] [--max-rounds N|none]
 //       [--<parameter> VALUE]... [--print] [--help] [--version] [-- <docker agent run flags>...]
 //   j5 setup [--check] [--proxy] [--login]
@@ -15,6 +15,7 @@ export const LAUNCHER_VALUE_OPTION_NAMES = [
   "project",
   "base",
   "effort",
+  "model",
   "queue",
   "queue-label",
   "max-rounds",

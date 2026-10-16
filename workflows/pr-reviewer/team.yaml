@@ -81,11 +81,47 @@ permissions:
     - pr_context
     - pr_diff
 
+# Launch options, chosen with `j5 pr-reviewer ... --model <tier> --effort <level>`: standard
+# flavors defined once in workflows/flavors.yaml and written into the block below by
+# `bun run flavors`. `flavors.models` in workflow.yaml lists the models they change. No flavor =
+# the file as written.
+# BEGIN GENERATED FLAVORS: written by `bun run flavors` from workflows/flavors.yaml and the
+# `flavors:` block of workflow.yaml. Edit those, not this block.
 flavors:
-  low:
+  model-haiku:
     models:
       reviewer_model:
         model: claude-haiku-5-5
+  model-sonnet:
+    models:
+      reviewer_model:
+        model: claude-sonnet-5-5
+  model-opus:
+    models:
+      reviewer_model:
+        model: claude-opus-4-7
+  effort-low:
+    models:
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: low
+  effort-medium:
+    models:
+      reviewer_model:
         provider_opts:
           extra_body:
             reasoning_effort: medium
+  effort-high:
+    models:
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: high
+  effort-xhigh:
+    models:
+      reviewer_model:
+        provider_opts:
+          extra_body:
+            reasoning_effort: xhigh
+# END GENERATED FLAVORS

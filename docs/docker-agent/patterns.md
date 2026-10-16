@@ -65,5 +65,5 @@ Each entry point that changes code runs in its own worktree beside the user's ch
 
 ## Effort
 
-### Effort is a flavor
-A team defines its effort levels as `flavors:` in `team.yaml` — a lower `harness.effort` and a cheaper `harness.model` for harness agents, cheaper models for native ones — and `j5 --effort <flavor>` selects one. No flavor means the file as written. Keep each flavor minimal (flavors deep-merge) and let `validate:teams` prove it changes something.
+### Model and effort are standard, generated flavors
+Every team offers the same two options, `--model <tier>` and `--effort <level>`, as flavors named `model-<tier>` and `effort-<level>`. docker-agent cannot share flavor definitions between files (they live in each `team.yaml`; its own idea of reuse is the same names everywhere), so `workflows/flavors.yaml` defines them once and `bun run flavors` writes each team's block from it and from the team's list of tunable models. Model and effort flavors patch different keys, so they combine in either order, and no flavor means the file as written. `validate:teams` proves each flavor does what its name says from docker-agent's merged config, because a flavor that repeats the base values changes nothing and applies without a word. Where a team keeps a reviewer off the builders' model class, the reviewer's own flavors are `j5`'s, not the user's.

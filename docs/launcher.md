@@ -27,11 +27,11 @@ The command goes through the link, so moving the clone only needs a re-run of th
 
 ```bash
 j5                                         # pick everything interactively
-j5 list                                    # teams, entry points, parameters, efforts
+j5 list                                    # teams, entry points, parameters, models, efforts
 j5 setup                                   # check this machine, install the skills ([packaging.md](packaging.md#what-j5-setup-does))
 j5 --version                               # the installed version
 j5 issue-team work-issue --issue 123       # from inside the project checkout
-j5 issue-team work-issue --issue 123 --project ~/code/app --effort low
+j5 issue-team work-issue --issue 123 --project ~/code/app --model haiku --effort medium
 j5 issue-team work-issue --issue 123 --base origin/release-2
 j5 pr-reviewer review --pr 456 -- --safety balanced   # after --: raw docker agent run flags
 j5 issue-team work-issue --issue 123 --print    # show the exact command, run nothing
@@ -41,7 +41,8 @@ j5 issue-team work-issue --issue 123 --print    # show the exact command, run no
 |---|---|---|
 | `--project <path>` | Checkout the team works on; any path inside a git repository | The repository around the current directory, any subdirectory; asked for only when you are not in one |
 | `--base <ref>` | Ref a `new` worktree branches from. Only for `new` worktrees | The remote default branch (`origin/HEAD`, else `gh`) |
-| `--effort <flavor>` | A `flavors:` key from the team's `team.yaml`, passed as `--flavor` | None: the team as written |
+| `--model <tier>` | Model tier for the team's builders, `haiku`, `sonnet` or `opus` as the team offers; passed as `--flavor model-<tier>` ([flavors](#model-and-effort-flavors)) | None: the team as written |
+| `--effort <level>` | Reasoning effort, `low`, `medium`, `high` or `xhigh` as the team offers; passed as `--flavor effort-<level>`. Independent of `--model` | None: the team as written |
 | `--<parameter> <value>` | The entry point's parameters, e.g. `--issue 123` | Asked for, or an error when not in a terminal |
 | `--queue <n,n,…>` | Run the entry point once per value, unattended ([queue runs](#queue-runs)). Only entry points with a `queue:` block | |
 | `--queue-label <label>` | The same, over every open issue with this label, oldest first. Needs a `gh` login (or `GH_TOKEN`) that can see the repository | |
@@ -55,10 +56,10 @@ The base-branch list shows remote branches as of your last `git fetch`. `j5` fet
 
 ## What it runs
 
-`j5 issue-team work-issue --issue 12 --effort low --print`, inside a clone at `~/code/my-app` (the message, the whole prompt, shortened here):
+`j5 issue-team work-issue --issue 12 --model haiku --print`, inside a clone at `~/code/my-app` (the message, the whole prompt, shortened here; the second `--flavor` is the reviewer's tier, chosen by `j5`, see *Independence*):
 
 ```bash
-git -C ~/code/my-app fetch origin main && git -C ~/code/my-app worktree add -b worktree-my-app-issue-12 ~/code/my-app-issue-12 origin/main && cd ~/code/my-app-issue-12 && PATH=<repo>/workflows/issue-team/bin:"$PATH" docker agent run <repo>/workflows/issue-team/team.yaml --agent root --flavor low --working-dir ~/code/my-app-issue-12 'Work issue #12. …'
+git -C ~/code/my-app fetch origin main && git -C ~/code/my-app worktree add -b worktree-my-app-issue-12 ~/code/my-app-issue-12 origin/main && cd ~/code/my-app-issue-12 && PATH=<repo>/workflows/issue-team/bin:"$PATH" docker agent run <repo>/workflows/issue-team/team.yaml --agent root --flavor model-haiku --flavor reviewer-on-sonnet --working-dir ~/code/my-app-issue-12 'Work issue #12. …'
 ```
 
 `j5` creates the worktree itself and starts docker-agent inside it with `--working-dir`. docker-agent's own `--worktree` / `--worktree-pr` create a worktree but leave a Claude Code harness agent in your checkout ([gotcha](docker-agent/gotchas.md#--worktree-does-not-move-a-harness-agent-into-the-worktree)). The git steps run before docker-agent and stop it from starting if one fails. `--print` runs none of them; on Windows its output chains them with `&&`, which needs PowerShell 7+.
@@ -122,7 +123,7 @@ Existing worktrees are still reused as-is, with no automatic refresh/reset.
 
 A `new` worktree whose branch `worktree-<name>` already exists without the directory (e.g. the directory was deleted, or an older docker-agent worktree elsewhere holds it) stops at `git worktree add`; delete the branch or remove that worktree first.
 
-**Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `effort`, `queue`, `queue-label`, `max-rounds`, `print`, `help`, `version`, `check`, `proxy`, `login`.
+**Reserved parameter names:** `repo`, `position`, `count`, `round_limit`, `project`, `base`, `model`, `effort`, `queue`, `queue-label`, `max-rounds`, `print`, `help`, `version`, `check`, `proxy`, `login`.
 
 **Independence.** A team where one agent reviews the work of others can say so:
 
@@ -132,9 +133,26 @@ independence:
   reviews: [builder, tester]     # from each of these agents' (all named in team.yaml)
 ```
 
-"Class" is the model's tier: `haiku`, `sonnet`, `opus` or `fable`, whatever the version (Sonnet 5.5 and Sonnet 4.6 are one class). Before it creates any worktree, `j5` reads the models the agents run on with the chosen `--effort` applied (`docker agent debug config`), puts the reviewer **one tier above the highest builder tier** (the nearest tier the team offers above it; one tier below when nothing is above, so a Fable builder gets an Opus reviewer), and passes the matching `reviewer-on-<tier>` flavor after the effort. It prints one line saying what it chose. The team offers tiers by defining flavors named `reviewer-on-<tier>` in team.yaml, each patching the reviewer's model. Those flavors are not efforts: they are not listed and `--effort reviewer-on-opus` is rejected.
+"Class" is the model's tier: `haiku`, `sonnet`, `opus` or `fable`, whatever the version (Sonnet 5.5 and Sonnet 4.6 are one class). Before it creates any worktree, `j5` reads the models the agents run on with the chosen `--model` and `--effort` applied (`docker agent debug config`), puts the reviewer **one tier above the highest builder tier** (the nearest tier the team offers above it; one tier below when nothing is above, so a Fable builder gets an Opus reviewer), and passes the matching `reviewer-on-<tier>` flavor after them. It prints one line saying what it chose. The team offers tiers by having flavors named `reviewer-on-<tier>` in team.yaml, each patching the reviewer's model (generated, see below). Those flavors are not a user choice: `--model` and `--effort` reject them.
 
-`j5` refuses to launch when no offered tier differs from the builders', when a model's id names no tier, or when `--model` or `--flavor` follows `--` (`docker agent debug config` has no `--model`, so such an override would change the models after the rule was checked). `bun run validate:teams` checks every `reviewer-on-<tier>` flavor and every effort. Logic: `launcher/src/independence.ts`, `reviewer-flavor.ts`.
+`j5` refuses to launch when no offered tier differs from the builders', when a model's id names no tier, or when `--model` or `--flavor` follows `--` (`docker agent debug config` has no `--model`, so such an override would change the models after the rule was checked). `bun run validate:teams` checks every `reviewer-on-<tier>` flavor and every combination of `--model` and `--effort`. Logic: `launcher/src/independence.ts`, `reviewer-flavor.ts`.
+
+### Model and effort flavors
+
+Every team offers the same two launch options, `--model <tier>` and `--effort <level>`, as standard flavors named `model-<tier>` and `effort-<level>`. docker-agent has no include or import for flavors (they live in each `team.yaml`; its own idea of reuse is the same names in every file), so they are defined once and **generated**:
+
+- `workflows/flavors.yaml` is the catalog: which model id each tier means (`haiku`, `sonnet`, `opus`) and which efforts exist (`low`, `medium`, `high`, `xhigh`).
+- A team's `workflow.yaml` says which of its named models the options change:
+
+  ```yaml
+  flavors:
+    models: [coordinator_model, builder_model, tester_model]
+  ```
+
+  `--model` puts exactly these on the chosen tier. `--effort` sets their `reasoning_effort` and the independence reviewer's too. The reviewer's own model is never listed: its tier is `j5`'s choice.
+- `bun run flavors` writes the flavors into the block between `# BEGIN GENERATED FLAVORS` and `# END GENERATED FLAVORS` at the end of the team's `team.yaml` (`bun run flavors --check` changes nothing and exits 1 when a block is stale). Edit the catalog or the manifest, never the block.
+
+`--model` and `--effort` combine in either order (they patch different keys), and with neither, the team runs as `team.yaml` is written. Passing only `--effort low` therefore changes reasoning effort and nothing else; it no longer means "the cheap preset". `bun run validate:teams` fails when a block is out of date, when a flavor's merged config does not do what its name says, and for any flavor name no option can reach. Logic: `launcher/src/flavor-catalog.ts`, `scripts/generate-flavors.ts`.
 
 **Queue block.** An entry point can also run over a queue:
 
@@ -147,6 +165,6 @@ independence:
 
 The preamble may use the parameters, `{repo}`, and three placeholders only it has: `{position}` and `{count}` (where the item stands) and `{round_limit}` (`at most 3 fix rounds`, or `no limit on the number of fix rounds`).
 
-**Effort** is not declared in the manifest. The valid values are the `flavors:` keys in `team.yaml`, read at launch, because docker-agent silently ignores unknown flavors ([gotcha](docker-agent/gotchas.md#an-unknown---flavor-is-silently-ignored)).
+**Effort and model** are not declared in the manifest. The valid values are the `model-*` and `effort-*` flavor names in `team.yaml`, read at launch, because docker-agent silently ignores unknown flavors ([gotcha](docker-agent/gotchas.md#an-unknown---flavor-is-silently-ignored)).
 
 `bun run validate:teams` checks every manifest against its team.yaml and the installed docker-agent.

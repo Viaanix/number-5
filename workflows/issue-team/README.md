@@ -19,10 +19,10 @@ flowchart LR
 | Agents | Four native agents: `root` (the entry point) and the `builder`, `tester` and `reviewer` it delegates to with `transfer_task`. The builders run on Sonnet 5.5 at effort high through the proxy; the reviewer runs on a different model tier (see *Independent review*) | `team.yaml` |
 | Prompts | One `instruction_file` per agent; `workflow.yaml` sends only the task ("Work issue #12") | `instructions/*.md`, `workflow.yaml` |
 | Helpers | Deterministic Bun scripts, launched from `PATH` by an `sh` launcher (Linux, macOS) or a `.cmd` (Windows); `test_prescreen` and `change_diff` are typed tools that call them | `helpers/*.ts`, `bin/`, `team.yaml` |
-| Effort levels | `low` flavor: the builders on Haiku 5.5 at effort medium (the reviewer at medium too; its model is chosen separately) | `team.yaml` → `flavors` |
+| Model and effort | `--model haiku\|sonnet\|opus` puts the builders (coordinator, builder, tester) on that tier; `--effort low\|medium\|high\|xhigh` sets reasoning effort on them and the reviewer. Independent options; defaults are Sonnet 5.5 builders, Opus 4.7 reviewer, all at high | Standard flavors generated into `team.yaml` from `workflows/flavors.yaml`; `flavors.models` in `workflow.yaml` |
 | Test discipline | `j5-test-quality` skill, read by path with `read_file`, and the `test_prescreen` tool | `skills/j5-test-quality` in this repository, installed to `~/.agents/skills/j5-test-quality` |
 | GitHub | `gh` CLI (issues, PRs) | `PATH` |
-| Independent review | The reviewer is never the builders' model class. `j5` puts it one tier above the builders (Opus 4.7 for the default Sonnet builders, Sonnet 5.5 for `--effort low`), and refuses to launch if it cannot | `independence` in `workflow.yaml`, `reviewer-on-<tier>` flavors in `team.yaml` |
+| Independent review | The reviewer is never the builders' model class. `j5` puts it one tier above the builders (Opus 4.7 for the default Sonnet builders, Sonnet 5.5 for `--model haiku` or `--model opus`), and refuses to launch if it cannot | `independence` in `workflow.yaml`, `reviewer-on-<tier>` flavors in `team.yaml` |
 
 ### Where prompts live
 
@@ -77,7 +77,7 @@ Each run works in its own git worktree beside your checkout (e.g. `~/code/my-app
 ## Commands
 
 ```bash
-j5 issue-team work-issue --issue 123 [--project <path>] [--base <ref>] [--effort low]
+j5 issue-team work-issue --issue 123 [--project <path>] [--base <ref>] [--model haiku] [--effort medium]
 j5 issue-team work-issue --issue 123 --print     # the full docker agent command, task included
 ```
 
