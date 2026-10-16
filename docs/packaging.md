@@ -21,7 +21,7 @@ Needs [Bun](https://bun.sh) 1.4.2 or newer, Docker with the `docker agent` plugi
    bun add -g @viaanix/number-5
    j5 --version
    j5 setup                 # checks your tools, installs the skills the teams read
-   j5 setup --proxy --login # optional: start the local proxy and log it in (pr-reviewer, issue-team)
+   j5 setup --proxy --login # optional: start the local proxy and log it in (every team uses it)
    ```
 
    Open a new terminal if `j5` is not found: Bun prints the global bin directory to add to `PATH`.
