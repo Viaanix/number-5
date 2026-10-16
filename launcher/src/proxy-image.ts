@@ -72,7 +72,21 @@ export function judgeProxyImage(expectedImage: string, runningImages: string[]):
     : { kind: "different", expectedImage, runningImages };
 }
 
-/** Finds the running proxy container by its Compose labels and judges its image. */
+function nonEmptyLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/**
+ * Finds the running proxy container by its Compose labels and judges its image.
+ *
+ * The image comes from `docker inspect`'s Config.Image, the reference the container was created
+ * from, and not from the Image column of `docker ps`: that column prints the image's ID when the
+ * image store can no longer map the container's image back to a name (seen 2026-10-16 on a live,
+ * correct container whose tag had since been rebuilt), which made a current proxy look stale.
+ */
 export function checkProxyImage(packageRoot: string, runCommand: CommandRunner): ProxyImageStatus {
   const expected = readExpectedProxy(packageRoot);
   if (expected === undefined) {
@@ -81,21 +95,27 @@ export function checkProxyImage(packageRoot: string, runCommand: CommandRunner):
   const listing = runCommand([
     "docker",
     "ps",
+    "--quiet",
     "--filter",
     `label=${COMPOSE_PROJECT_LABEL}=${expected.project}`,
     "--filter",
     `label=${COMPOSE_SERVICE_LABEL}=${PROXY_SERVICE_NAME}`,
-    "--format",
-    "{{.Image}}",
   ]);
-  if (listing.exitCode !== 0) {
+  const containerIds = listing.exitCode === 0 ? nonEmptyLines(listing.standardOutput) : [];
+  if (containerIds.length === 0) {
     return { kind: "unknown" };
   }
-  const runningImages = listing.standardOutput
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  return judgeProxyImage(expected.image, runningImages);
+  const inspection = runCommand([
+    "docker",
+    "inspect",
+    "--format",
+    "{{.Config.Image}}",
+    ...containerIds,
+  ]);
+  if (inspection.exitCode !== 0) {
+    return { kind: "unknown" };
+  }
+  return judgeProxyImage(expected.image, nonEmptyLines(inspection.standardOutput));
 }
 
 /** The line a mismatch is reported with, shared by `j5 setup` and the launch warning. */

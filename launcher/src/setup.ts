@@ -47,7 +47,7 @@ const DOCKER_AGENT_ENV_FILE_PARTS = [".config", "cagent", ".env"];
 const OWNER_ONLY_FILE_MODE = 0o600;
 // Opens Pi's own terminal UI in the proxy image, where `/login` stores the Claude login in the
 // proxy's credential volume. Same command the proxy README gives.
-const PI_LOGIN_ENTRYPOINT = "bun";
+const PI_LOGIN_ENTRYPOINT = "node";
 const PI_LOGIN_ARGUMENTS = [
   "/app/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
   "--no-session",
