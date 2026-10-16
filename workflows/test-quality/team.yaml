@@ -75,6 +75,7 @@ agents:
     # one drifts. Only the framework references stay a read (they depend on the project).
     # review-single.md is deliberately not here: the auditor reads it only for a small target.
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/auditor.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/review-at-scale.md
@@ -113,6 +114,7 @@ agents:
     model: reviewer_model
     description: Independent, read-only review of the tests added or changed on the current branch; has no shell and no write tools
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/reviewer.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/review-single.md
@@ -141,6 +143,7 @@ agents:
     model: writer_model
     description: Writes tests that fail against broken implementations, in the current checkout. Does not edit production code, commit, or push.
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/writer.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/generate.md
@@ -170,6 +173,7 @@ agents:
     model: fixer_model
     description: Finds why a test fails and fixes the cause, in the current checkout. Changes a test only with a written justification. Does not commit or push.
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/fixer.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/maintain-failing.md
@@ -198,7 +202,9 @@ agents:
   reader:
     model: reader_model
     description: Reads the test files of one region and reports findings with file:line citations; read-only
-    instruction_file: instructions/reader.md
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/reader.md
     max_iterations: 60
     toolsets:
       - type: filesystem

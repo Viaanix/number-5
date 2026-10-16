@@ -61,7 +61,9 @@ agents:
   root:
     model: coordinator_model
     description: Owns one GitHub issue from a fresh worktree to a pull request, a draft when the review or verification does not pass
-    instruction_file: instructions/work-issue.md
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/work-issue.md
     add_prompt_files: [AGENTS.md, CLAUDE.md]
     add_environment_info: true
     max_iterations: 150
@@ -75,7 +77,9 @@ agents:
   builder:
     model: builder_model
     description: Implements code changes from a self-contained task; does not commit or push
-    instruction_file: instructions/builder.md
+    instruction_file:
+      - instructions/j5-craft.md
+      - instructions/builder.md
     add_prompt_files: [AGENTS.md, CLAUDE.md]
     add_environment_info: true
     max_iterations: 150
@@ -92,6 +96,7 @@ agents:
     # directory, so these are copies of skills/j5-test-quality; test/skill-instructions.test.ts
     # fails when one drifts. Only the framework reference stays a read: it depends on the project.
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/tester.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/generate.md
@@ -119,6 +124,7 @@ agents:
     # Same for the review workflow and its checklists: loaded for the reviewer, not left for it
     # to remember to read.
     instruction_file:
+      - instructions/j5-craft.md
       - instructions/reviewer.md
       - instructions/skill/j5-test-quality.md
       - instructions/skill/review-single.md

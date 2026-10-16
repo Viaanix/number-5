@@ -94,7 +94,7 @@ The first two wrap `launcher/src/test-prescreen.ts` and `launcher/src/change-dif
 
 ## Not verified
 
-- No live model run of any entry point: no agent has talked to the proxy since the conversion from the Claude Code harness. Whether the models follow the instructions (transfer_task to `reader` with the verbatim template, the verdict template, mutation-then-restore) is untested.
+- Only the `audit` entry point has had live runs (2026-10-16, through the Node proxy image): two full audits of `vx-daniel/pi-openai-proxy`'s 35-file `test/` (about 14 and 15 minutes, three `reader` sessions each, a report written each time) and two audits of one file. `review-branch`, `write-tests` and `fix-failing` have had no live run, so whether the writer and fixer follow their instructions (the mutation-then-restore step in particular) is untested. Which model served each request, and whether any request failed or was retried, was not recorded for the first full audit: the proxy container, and its logs, were removed afterwards.
 - That every request these agents send is accepted on Opus 5.5, Sonnet 5.5 and Haiku 5.5 at every effort: Sonnet and Haiku were tried at all four levels on 2026-10-15, Opus 5.5 only at `high` and `xhigh` (2026-10-16); `max` is rejected on the models it was tried on. These were one-word requests, not a real agent run.
 - That the permission `deny` patterns match as intended inside a live run (only parsed).
 - That a 30,000-character report passes through the environment on Windows.
